@@ -1,0 +1,20 @@
+# Burst packaged theme — compatible with Warn 2.2.0's data-only theme pattern.
+name=Vana'diel Tactical
+window_bg=061219F6
+panel_bg=091225E6
+panel_alt=0D1831EB
+field_bg=050812F5
+brass=D1B064FF
+brass_hover=F7D680FF
+brass_dim=665430FF
+text=EDEAD9FF
+text_muted=91A3BDFF
+selected=183B80F2
+selected_hover=214FA6FF
+important=4DADFFFF
+danger=FFA629FF
+critical=FF3630FF
+success=6BEB80FF
+rounding=5
+border_size=1
+

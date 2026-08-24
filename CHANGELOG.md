@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.2 — 2026-08-23
+
+- Replaced the generated circular `B` medallion with the user-supplied Burst logo artwork.
+- Reshaped the launcher into a compact ornamental plaque so the square logo fits without cropping.
+- Added guarded launcher texture loading, explicit unload cleanup, theme override support, Diagnostics status, and the original text `B` fallback.
+
+## 0.2.1 — 2026-08-23
+
+- Added the eight user-supplied Wind, Fire, Water, Ice, Lightning, Light, Dark, and Earth icons as individual PNG assets.
+- Added icon-plus-name burst-element capsules to the live notification card.
+- Added smaller contextual icons to the Burst Coach, preferred-spell resolution, planner result, and selected-spell detail views without filling dense lists with repeated artwork.
+- Added guarded Direct3D texture loading, explicit unload cleanup, and text/color fallback behavior for incompatible or missing textures.
+- Added icon-load status to Diagnostics and compact scaling for four-element Light, Darkness, Radiance, and Umbra rows.
+
 ## 0.2.0 — 2026-08-23
 
 - Redesigned the notification card around a dark-navy, double-line brass frame with chamfered corners and cardinal diamond ornaments.

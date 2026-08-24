@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.2.0';
+addon.version   = '0.2.2';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 
@@ -21,6 +21,8 @@ local skillchains = require('data.skillchains');
 local spell_catalog = require('data.spells');
 local skills = require('data.skills');
 local ui_theme = require('ui.theme');
+local element_icons = require('ui.element_icons');
+local launcher_icon = require('ui.launcher_icon');
 
 local default_settings = T{
     enabled = true,
@@ -227,6 +229,7 @@ end
 
 local function reload_theme()
     burst.theme = ui_theme.load(addon.path, burst.settings.ui.theme);
+    launcher_icon.load(ui_theme.launcher_path(burst.theme));
 end
 
 local function color_alpha(color, alpha)
@@ -318,6 +321,17 @@ local skillchain_colors = {
     Fragmentation = { 0.36, 0.76, 1.00, 1.0 }, Distortion = { 0.38, 0.82, 0.94, 1.0 },
     Fusion = { 1.00, 0.48, 0.20, 1.0 }, Gravitation = { 0.66, 0.38, 0.82, 1.0 },
 };
+
+local function render_element_labels(elements, icon_size, uppercase)
+    icon_size = tonumber(icon_size) or (20 * get_ui_scale());
+    for index, element in ipairs(elements or {}) do
+        if (index > 1) then imgui.SameLine(0, 9 * get_ui_scale()); end
+        local drew_icon = element_icons.draw(element, icon_size);
+        if (drew_icon) then imgui.SameLine(0, 4 * get_ui_scale()); end
+        local label = uppercase and tostring(element):upper() or tostring(element);
+        imgui.TextColored(element_colors[element] or burst.theme.important, label);
+    end
+end
 
 --------------------------------------------------------------------------------------------------
 -- Sound
@@ -630,7 +644,9 @@ local function render_overlay()
         imgui.SameLine(); imgui.TextColored(chain_accent, tostring(state.property or 'BURST'):upper());
         imgui.SameLine(); imgui.TextColored(burst.theme.text_muted, '  ' .. tostring(state.target or ''));
 
-        local element_label = 'BURST ELEMENTS';
+        local chip_font_scale = math.max(0.68, math.min(1.0, scale));
+        set_ui_font_scale(chip_font_scale);
+        local element_label = scale < 0.68 and 'ELEMENTS' or 'BURST ELEMENTS';
         imgui.SetCursorScreenPos({ wx + 22 * scale, wy + 47 * scale });
         imgui.TextColored(burst.theme.text_muted, element_label);
         local chip_x = wx + 22 * scale + measured_text_width(element_label) + 14 * scale;
@@ -638,15 +654,25 @@ local function render_overlay()
             local chip_color = element_colors[burst_element] or burst.theme.important;
             local chip_text = tostring(burst_element):upper();
             local chip_text_width = measured_text_width(chip_text);
-            local chip_width = math.max(52 * scale, chip_text_width + 24 * scale);
+            local icon_size = 22 * scale;
+            local has_icon = element_icons.has(burst_element);
+            local icon_space = has_icon and (icon_size + 6 * scale) or 0;
+            local chip_width = math.max(52 * scale, chip_text_width + icon_space + 20 * scale);
             draw:AddRectFilled({ chip_x + 3 * scale, wy + 42 * scale }, { chip_x + chip_width - 3 * scale, wy + 68 * scale },
                 imgui.GetColorU32(color_alpha(chip_color, 0.17)), 1 * scale);
             draw_chamfered_frame(draw, chip_x, wy + 42 * scale, chip_x + chip_width, wy + 68 * scale,
                 5 * scale, imgui.GetColorU32(color_alpha(chip_color, 0.90)), math.max(1, scale));
-            imgui.SetCursorScreenPos({ chip_x + math.max(10 * scale, (chip_width - chip_text_width) / 2), wy + 47 * scale });
+            local content_width = chip_text_width + icon_space;
+            local content_x = chip_x + math.max(8 * scale, (chip_width - content_width) / 2);
+            if (has_icon and not element_icons.draw_at(burst_element, content_x, wy + 44 * scale, icon_size)) then
+                has_icon = false; icon_space = 0; content_width = chip_text_width;
+                content_x = chip_x + math.max(8 * scale, (chip_width - content_width) / 2);
+            end
+            imgui.SetCursorScreenPos({ content_x + (has_icon and icon_space or 0), wy + 47 * scale });
             imgui.TextColored(chip_color, chip_text);
             chip_x = chip_x + chip_width + 6 * scale;
         end
+        set_ui_font_scale(1.0);
 
         local primary = overlay_primary_text(state);
         local secondary = overlay_secondary_text(state, primary);
@@ -730,13 +756,15 @@ local function render_coach_tab()
         imgui.TextColored(burst.theme.text_muted, 'Waiting for a confirmed skillchain on ' .. (burst.settings.advisor.target_policy == 'current' and 'your current target.' or 'a loaded target.'));
     else
         imgui.TextColored(burst.theme.brass_hover, tostring(chain.property):upper() .. ' — ' .. tostring(chain.target_name));
-        imgui.Text('Burst elements: ' .. table.concat(chain.elements or {}, ' / '));
+        imgui.Text('Burst elements:'); imgui.SameLine();
+        render_element_labels(chain.elements, 19 * get_ui_scale(), false);
         imgui.Text(string.format('Window: %.1fs remaining', math.max(0, chain.expires_at - os.clock())));
         imgui.Separator();
         if (rec.status == 'success') then
             imgui.TextColored(burst.theme.success, 'MAGIC BURST CONFIRMED — ' .. tostring(chain.success_spell));
             if ((tonumber(chain.success_damage) or 0) > 0) then imgui.Text('Damage: ' .. tostring(chain.success_damage)); end
         elseif (rec.best ~= nil) then
+            if (element_icons.draw(rec.best.element, 28 * get_ui_scale())) then imgui.SameLine(0, 7 * get_ui_scale()); end
             imgui.TextColored(element_colors[rec.best.element] or burst.theme.important, 'CAST ' .. rec.best.name:upper());
             imgui.Text(string.format('Estimated landing: %.2fs   Latest safe start: %.2fs', rec.best.cast_time, rec.best.latest_start));
             imgui.Text(string.format('MP: %d   Family: %s', rec.best.mp, rec.best.family));
@@ -792,7 +820,12 @@ local function render_assist_tab()
         local spell_buffer = { tostring(cfg.preferred_spell or '') };
         if (imgui.InputText('Mage Preferred Spell##burst_assist_spell', spell_buffer, 64)) then cfg.preferred_spell = spell_buffer[1]; save_settings(); end
         local preferred = spell_catalog.by_name[tostring(cfg.preferred_spell or ''):lower()];
-        imgui.TextColored(burst.theme.text_muted, preferred and ('Resolved burst element: ' .. preferred.element) or 'Spell is not in the advisor catalog yet.');
+        if (preferred ~= nil) then
+            imgui.TextColored(burst.theme.text_muted, 'Resolved burst element:'); imgui.SameLine();
+            render_element_labels({ preferred.element }, 18 * get_ui_scale(), false);
+        else
+            imgui.TextColored(burst.theme.text_muted, 'Spell is not in the advisor catalog yet.');
+        end
     elseif (cfg.goal == 'Preferred Element') then
         local values = { 'Fire', 'Ice', 'Wind', 'Earth', 'Lightning', 'Water', 'Light', 'Dark' };
         local value, did = combo_value('Mage Element##burst_assist_element', cfg.preferred_element, values);
@@ -846,8 +879,8 @@ local function render_assist_tab()
     imgui.EndChild();
     local selected = burst.plans[burst.selected_plan];
     if (selected ~= nil) then
-        imgui.TextColored(burst.theme.brass_hover, 'Burst: ' .. table.concat(selected.elements, ' / '));
-        imgui.SameLine();
+        imgui.TextColored(burst.theme.brass_hover, 'Burst:'); imgui.SameLine();
+        render_element_labels(selected.elements, 18 * get_ui_scale(), false);
         if (imgui.Button('Activate Coach')) then
             burst.active_plan = planner.activate(selected);
             if (cfg.mode == 'Off' or cfg.mode == 'Planner') then cfg.mode = 'Coach'; save_settings(); end
@@ -932,6 +965,7 @@ local function render_spell_options()
     if (entry == nil) then
         imgui.TextColored(burst.theme.text_muted, 'Select a spell.');
     else
+        if (element_icons.draw(entry.element, 30 * get_ui_scale())) then imgui.SameLine(0, 7 * get_ui_scale()); end
         imgui.TextColored(element_colors[entry.element] or burst.theme.important, entry.name);
         imgui.Text('Element: ' .. entry.element);
         imgui.Text('Family: ' .. entry.family);
@@ -972,7 +1006,7 @@ local function render_appearance_options()
 
     imgui.Separator(); imgui.TextColored(burst.theme.brass_hover, 'Launcher');
     local launcher = ui.launcher_enabled == true;
-    if (imgui.Checkbox('Show Draggable B Launcher', { launcher })) then ui.launcher_enabled = not launcher; save_settings(); end
+    if (imgui.Checkbox('Show Draggable Burst Launcher', { launcher })) then ui.launcher_enabled = not launcher; save_settings(); end
     local launcher_size = { tonumber(ui.launcher_size) or 58 };
     if (imgui.SliderFloat('Launcher Size', launcher_size, 36, 96, '%.0f px')) then ui.launcher_size = launcher_size[1]; save_settings(); end
     if (imgui.Button('Reset Launcher Position')) then ui.launcher_position_x = -1; ui.launcher_position_y = -1; burst.ui.launcher_initialized = false; save_settings(); end
@@ -1065,6 +1099,10 @@ local function render_diagnostics_options()
     imgui.Text(string.format('0x028 parsed: %d   duplicates: %d   parse errors: %d', stats.parsed, stats.duplicates, stats.parse_errors));
     imgui.Text(string.format('Actors ignored outside alliance/pets: %d', stats.ignored_actors or 0));
     imgui.Text(string.format('Actions examined: %d   confirmed chains: %d   confirmed bursts: %d', stats.actions, stats.chains, stats.bursts));
+    imgui.Text(string.format('Element icons: %d/8 loaded%s', element_icons.count(),
+        element_icons.error and (' — ' .. element_icons.error) or ''));
+    imgui.Text(string.format('Launcher artwork: %s%s', launcher_icon.has() and 'loaded' or 'text fallback',
+        launcher_icon.error and (' — ' .. launcher_icon.error) or ''));
     imgui.Text('Last layout: ' .. tostring(burst.tracker.last_layout));
     imgui.TextWrapped('Last event: ' .. tostring(burst.tracker.last_event));
     imgui.Separator();
@@ -1136,20 +1174,17 @@ local function render_launcher()
     if (imgui.Begin('##burst_launcher', true, flags)) then
         local x, y = imgui.GetCursorScreenPos();
         local draw = imgui.GetWindowDrawList();
-        local center_x, center_y = x + size / 2, y + size / 2;
-        draw:AddCircleFilled({ center_x, center_y }, size * 0.43, imgui.GetColorU32(burst.theme.panel_bg), 48);
-        draw:AddCircle({ center_x, center_y }, size * 0.43, imgui.GetColorU32(burst.theme.brass), 48, math.max(1, scale * 1.5));
-        draw:AddCircle({ center_x, center_y }, size * 0.36, imgui.GetColorU32(burst.theme.brass_dim), 48, math.max(1, scale));
-        local ornament = size * 0.075;
-        draw_diamond_outline(draw, center_x, y + size * 0.07, ornament, ornament,
-            imgui.GetColorU32(burst.theme.brass_hover), math.max(1, scale));
-        draw_diamond_outline(draw, center_x, y + size * 0.93, ornament, ornament,
-            imgui.GetColorU32(burst.theme.brass_hover), math.max(1, scale));
-        draw_diamond_outline(draw, x + size * 0.07, center_y, ornament, ornament,
-            imgui.GetColorU32(burst.theme.brass), math.max(1, scale));
-        draw_diamond_outline(draw, x + size * 0.93, center_y, ornament, ornament,
-            imgui.GetColorU32(burst.theme.brass), math.max(1, scale));
-        draw:AddText({ x + size * 0.37, y + size * 0.27 }, imgui.GetColorU32(burst.theme.brass_hover), 'B');
+        local inset = math.max(4, 5 * scale);
+        draw:AddRectFilled({ x + 2 * scale, y + 2 * scale }, { x + size - 2 * scale, y + size - 2 * scale },
+            imgui.GetColorU32(burst.theme.panel_bg), 3 * scale);
+        imgui.SetCursorScreenPos({ x + inset, y + inset });
+        local image_drawn = launcher_icon.draw(size - inset * 2, size - inset * 2);
+        draw_ornate_frame(draw, x + 2 * scale, y + 2 * scale, x + size - 2 * scale, y + size - 2 * scale,
+            burst.theme.brass, burst.theme.brass_dim, math.max(0.75, scale));
+        if (not image_drawn) then
+            draw:AddText({ x + size * 0.37, y + size * 0.27 }, imgui.GetColorU32(burst.theme.brass_hover), 'B');
+        end
+        imgui.SetCursorScreenPos({ x, y });
         imgui.InvisibleButton('##burst_launcher_control', { size, size });
         if (imgui.IsItemClicked(0)) then burst.ui.launcher_press = true; burst.ui.launcher_dragged = false; burst.ui.launcher_mouse_x, burst.ui.launcher_mouse_y = imgui.GetMousePos(); end
         if (burst.ui.launcher_press and imgui.IsMouseDown(0)) then
@@ -1198,7 +1233,7 @@ local function render_config_window()
         if (burst.main_tab[1] == 1) then render_coach_tab(); elseif (burst.main_tab[1] == 2) then render_assist_tab(); else render_options_tab(); end
         imgui.EndChild(); imgui.Separator();
         imgui.TextColored(burst.theme.text_muted, burst.settings.ui.controller_enabled and 'Controller: LB/RB tabs   D-pad navigate   B/Circle close   •   Advice only'
-            or 'Tip: click the B launcher to reopen Burst, or drag it to reposition it.');
+            or 'Tip: click the Burst launcher to reopen the dashboard, or drag it to reposition it.');
     end
     imgui.End(); ui_theme.pop();
 end
@@ -1220,7 +1255,7 @@ end
 
 ashita.events.register('load', 'burst_load_cb', function ()
     burst.settings = settings.load(default_settings, 'burst_settings');
-    ensure_settings(); sync_profile(); reload_theme(); refresh_sounds(false);
+    ensure_settings(); sync_profile(); reload_theme(); element_icons.load(addon.path); refresh_sounds(false);
     settings.register('burst_settings', 'burst_settings_update_cb', function (new_settings)
         if (new_settings ~= nil) then burst.settings = new_settings; burst.profile_key = nil; ensure_settings(); sync_profile(); reload_theme(); end
     end);
@@ -1231,7 +1266,7 @@ ashita.events.register('load', 'burst_load_cb', function ()
     end
 end);
 
-ashita.events.register('unload', 'burst_unload_cb', function () save_settings(); end);
+ashita.events.register('unload', 'burst_unload_cb', function () launcher_icon.unload(); element_icons.unload(); save_settings(); end);
 
 ashita.events.register('packet_in', 'burst_packet_in_cb', function (e)
     if (burst.settings == nil) then return; end

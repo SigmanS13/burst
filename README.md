@@ -1,4 +1,4 @@
-# Burst 0.1.0
+# Burst 0.1.1
 
 Burst is a manual magic-burst advisor and optional skillchain coach for **retail FFXI on Ashita v4**. It observes incoming combat data, recommends an action, and leaves every spell, weaponskill, target choice, and equipment change to the player.
 
@@ -43,6 +43,8 @@ After a confirmed skillchain on a valid loaded enemy, Burst:
 - Shows one recommendation and no more than two alternates.
 - Prefers a faster spell when a stronger spell would land too late.
 - Confirms a manually cast magic burst from its result packet.
+- Labels every live result as `SKILLCHAIN:` and displays all valid burst elements as color-coded capsules.
+- Shows `WINDOW CLOSED` for 0.5 seconds by default, then dismisses the combat card.
 
 The default target policy is **Current Target Only**. This prevents a chain elsewhere in a crowded fight from telling you to cast on the wrong enemy.
 
@@ -81,6 +83,8 @@ The coach only reacts to confirmed actions. Unexpected steps in Adaptive Coach m
 ## Appearance, themes, and sound
 
 - Use **Options → Appearance** for scale presets, card opacity/scale, edge intensity, reduced motion, alternates, controller layout, and the live draggable positioning preview.
+- The element-colored screen-edge cue is enabled by default and activates for every confirmed skillchain, including blocked recommendations. Use **Test Edge Cue** to preview it safely.
+- Use **Options → Timing → Post-Window Linger** to change the default 0.5-second dismissal hold.
 - Packaged themes live under `burst/themes/<name>/theme.txt`.
 - Per-user themes can be placed under `Ashita/config/addons/burst/themes/<name>/theme.txt`.
 - Put standard `.wav` files in `burst/sounds`, then use **Options → Sound → Refresh Sounds**. File choices are exact-name persisted and can be tested in place.

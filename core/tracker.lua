@@ -119,12 +119,15 @@ function M:process(packet, now, settings, local_server_id, resolve_name, is_allo
     return events;
 end
 
-function M:prune(now)
+function M:prune(now, post_window_linger)
     now = tonumber(now) or os.clock();
+    post_window_linger = math.max(0, tonumber(post_window_linger) or 0.5);
     for id, target in pairs(self.targets) do
         local expires = tonumber(target.expires_at);
         local starter_time = target.starter and tonumber(target.starter.time) or nil;
-        if (expires ~= nil and now > expires + 4.0) or
+        local success_at = target.success and tonumber(target.success_at) or nil;
+        local success_visible = success_at ~= nil and now <= success_at + 2.5;
+        if (not success_visible and expires ~= nil and now > expires + post_window_linger) or
            (expires == nil and starter_time ~= nil and now > starter_time + 12.0) then
             self.targets[id] = nil;
         end

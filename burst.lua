@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.1.0';
+addon.version   = '0.1.1';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 
@@ -39,6 +39,7 @@ local default_settings = T{
         fast_cast = 50.0,
         latency = 0.20,
         safety_margin = 0.60,
+        post_window_linger = 0.50,
     },
     assist = T{
         mode = 'Off', -- Off / Planner / Coach / Adaptive Coach
@@ -62,7 +63,7 @@ local default_settings = T{
     overlay = T{
         position_x = 480, position_y = 260,
         card_opacity = 0.88, card_scale = 1.0,
-        edge_enabled = true, edge_intensity = 0.65,
+        edge_enabled = true, edge_intensity = 0.72,
         reduced_motion = false, show_alternates = true,
     },
     ui = T{
@@ -204,6 +205,13 @@ local element_colors = {
     Light = { 1.00, 0.96, 0.72, 1.0 }, Dark = { 0.42, 0.28, 0.72, 1.0 },
 };
 
+local skillchain_colors = {
+    Radiance = { 1.00, 0.90, 0.45, 1.0 }, Umbra = { 0.54, 0.30, 0.82, 1.0 },
+    Light = { 1.00, 0.88, 0.48, 1.0 }, Darkness = { 0.50, 0.30, 0.76, 1.0 },
+    Fragmentation = { 0.36, 0.76, 1.00, 1.0 }, Distortion = { 0.38, 0.82, 0.94, 1.0 },
+    Fusion = { 1.00, 0.48, 0.20, 1.0 }, Gravitation = { 0.66, 0.38, 0.82, 1.0 },
+};
+
 --------------------------------------------------------------------------------------------------
 -- Sound
 --------------------------------------------------------------------------------------------------
@@ -274,7 +282,7 @@ local function combined_advisor_settings()
 end
 
 local function update_recommendation()
-    burst.tracker:prune(os.clock());
+    burst.tracker:prune(os.clock(), burst.settings.timing.post_window_linger);
     local current = player_state.current_target();
     local chain = burst.tracker:best_chain(current and current.id or nil, burst.settings.advisor.target_policy);
     burst.current_chain = chain;
@@ -327,11 +335,14 @@ end
 local function run_preview(kind)
     local now = os.clock();
     if (kind == 'success') then
-        burst.preview_state = { status = 'success', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V', detail = 'MAGIC BURST CONFIRMED', started = now };
+        burst.preview_state = { status = 'success', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V',
+            detail = 'MAGIC BURST CONFIRMED', elements = skillchains.elements('Fragmentation'), started = now };
     elseif (kind == 'blocked') then
-        burst.preview_state = { status = 'blocked', property = 'Fragmentation', target = 'Apex Crab', spell = nil, detail = 'THUNDER V RECAST — USE AERO IV', started = now };
+        burst.preview_state = { status = 'blocked', property = 'Light', target = 'Shadow Lord', spell = nil,
+            detail = 'NOT LEARNED', elements = skillchains.elements('Light'), remaining = 2.3, started = now };
     else
-        burst.preview_state = { status = 'ready', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V', detail = 'CAST NOW', remaining = 6.8, started = now };
+        burst.preview_state = { status = 'ready', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V',
+            detail = 'CAST NOW', elements = skillchains.elements('Fragmentation'), remaining = 6.8, started = now };
     end
 end
 
@@ -345,7 +356,7 @@ local function draw_edges(display, color, alpha)
     local scale = get_ui_scale();
     local pulse = 1.0;
     if (cfg.reduced_motion ~= true) then pulse = 0.84 + 0.16 * math.abs(math.sin(os.clock() * math.pi * 1.35)); end
-    local intensity = math.max(0, math.min(1, tonumber(cfg.edge_intensity) or 0.65));
+    local intensity = math.max(0, math.min(1, tonumber(cfg.edge_intensity) or 0.72));
     local outer = imgui.GetColorU32(color_alpha(color, 0.50 * intensity * pulse * alpha));
     local clear = imgui.GetColorU32(color_alpha(color, 0));
     local thickness = math.max(28, math.min(display.x, display.y) * 0.075 * scale);
@@ -366,20 +377,27 @@ end
 local function overlay_content()
     if (burst.preview_state ~= nil and os.clock() - burst.preview_state.started <= 8.0) then return burst.preview_state, true; end
     if (burst.active_plan ~= nil and burst.active_plan.completed_at ~= nil and
-        os.clock() - burst.active_plan.completed_at > (tonumber(burst.settings.timing.burst_window) or 10.0) + 3.0) then
+        os.clock() - burst.active_plan.completed_at > (tonumber(burst.settings.timing.burst_window) or 10.0) +
+            math.max(0, tonumber(burst.settings.timing.post_window_linger) or 0.5)) then
         burst.active_plan = nil;
     end
     local chain, rec = burst.current_chain, burst.recommendation;
+    if (chain ~= nil and chain.success ~= true and chain.expires_at ~= nil and os.clock() > chain.expires_at) then
+        return {
+            status = 'closed', property = chain.property, target = chain.target_name, confirmed = true,
+            detail = 'WINDOW CLOSED', remaining = 0, elements = chain.elements,
+        }, false;
+    end
     if (chain ~= nil and burst.active_plan ~= nil and burst.active_plan.completed and burst.settings.assist.mage_mode ~= 'Me') then
         return {
-            status = 'coach', property = chain.property, target = chain.target_name,
+            status = 'coach', property = chain.property, target = chain.target_name, confirmed = true,
             spell = tostring(burst.active_plan.mage_name or 'MAGE') .. ': BURST',
             detail = 'HOLD WEAPONSKILLS', remaining = math.max(0, chain.expires_at - os.clock()),
             elements = chain.elements,
         }, false;
     end
     if (burst.settings.enabled == true and chain ~= nil and rec ~= nil and rec.status ~= 'idle') then
-        local state = { property = chain.property, target = chain.target_name, status = rec.status,
+        local state = { property = chain.property, target = chain.target_name, status = rec.status, confirmed = true,
             detail = rec.reason, remaining = rec.remaining, elements = chain.elements };
         if (rec.best ~= nil) then state.spell = rec.best.name; end
         if (rec.alternates ~= nil) then state.alternates = rec.alternates; end
@@ -405,6 +423,35 @@ local function overlay_content()
     return nil, false;
 end
 
+local function overlay_primary_text(state)
+    if (state.status == 'success') then return 'MAGIC BURST CONFIRMED'; end
+    if (state.status == 'closed') then return 'WINDOW CLOSED'; end
+    if (state.spell ~= nil) then
+        if (state.status == 'coach') then return tostring(state.spell):upper(); end
+        return 'CAST ' .. tostring(state.spell):upper();
+    end
+    local detail = tostring(state.detail or 'WAIT');
+    if (detail == 'NOT LEARNED') then return 'NO MATCHING SPELL LEARNED'; end
+    if (detail:find('WRONG TARGET', 1, true)) then return 'WRONG TARGET'; end
+    if (detail:find('TARGET IS NOT LOADED', 1, true)) then return 'TARGET NOT LOADED'; end
+    if (detail:find('TOO LATE', 1, true)) then return 'TOO LATE TO BURST'; end
+    if (#detail > 32) then return 'NO USABLE BURST SPELL'; end
+    return detail;
+end
+
+local function overlay_secondary_text(state, primary)
+    if (state.status == 'success') then
+        return state.spell and (tostring(state.spell):upper() .. ' BURST SUCCESSFUL') or nil;
+    end
+    if (state.status == 'closed') then return 'The magic-burst window has ended.'; end
+    if (state.spell ~= nil) then return tostring(state.detail or 'CAST NOW'); end
+    if (tostring(state.detail or '') == 'NOT LEARNED') then
+        return 'Learn or enable one of the burst elements shown above.';
+    end
+    if (tostring(state.detail or '') ~= primary) then return tostring(state.detail); end
+    return nil;
+end
+
 local function render_overlay()
     local state, preview = overlay_content();
     local appearance_open = burst.is_gui_open[1] and burst.main_tab[1] == 3 and burst.options_section[1] == 4;
@@ -414,15 +461,25 @@ local function render_overlay()
     local cfg = burst.settings.overlay;
     local scale = get_ui_scale() * math.max(0.70, math.min(1.40, tonumber(cfg.card_scale) or 1.0));
     local element = state.elements and state.elements[1] or nil;
+    local spell_element = nil;
     if (state.spell ~= nil) then
         local entry = spell_catalog.by_name[tostring(state.spell):lower()];
-        if (entry ~= nil) then element = entry.element; end
+        if (entry ~= nil) then spell_element = entry.element; end
     end
-    local accent = element_colors[element] or (state.status == 'success' and burst.theme.success or burst.theme.important);
-    if (state.status == 'urgent' or state.status == 'blocked') then accent = burst.theme.danger; end
-    if (state.status == 'ready' or state.status == 'urgent') then draw_edges(display, accent, 1.0); end
+    local chain_accent = (spell_element and element_colors[spell_element]) or skillchain_colors[state.property] or
+        element_colors[element] or burst.theme.important;
+    local accent = chain_accent;
+    if (state.status == 'urgent' or state.status == 'blocked') then accent = burst.theme.danger;
+    elseif (state.status == 'success') then accent = burst.theme.success;
+    elseif (state.status == 'closed') then accent = burst.theme.text_muted; end
 
-    local width, height = math.min(display.x * 0.60, 590 * scale), 158 * scale;
+    if (preview or state.confirmed == true) then
+        local edge_color = state.status == 'success' and burst.theme.success or chain_accent;
+        local edge_alpha = state.status == 'closed' and 0.35 or (state.status == 'success' and 0.60 or 1.0);
+        draw_edges(display, edge_color, edge_alpha);
+    end
+
+    local width, height = math.min(display.x * 0.68, 620 * scale), 196 * scale;
     local x = tonumber(cfg.position_x) or math.floor((display.x - width) / 2);
     local y = tonumber(cfg.position_y) or math.floor(display.y * 0.22);
     local flags = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_NoResize, ImGuiWindowFlags_NoScrollbar,
@@ -434,10 +491,15 @@ local function render_overlay()
         local wx, wy = imgui.GetWindowPos();
         local draw = imgui.GetWindowDrawList();
         local bg = color_alpha(burst.theme.window_bg, tonumber(cfg.card_opacity) or 0.88);
-        draw:AddRectFilled({ wx, wy }, { wx + width, wy + height }, imgui.GetColorU32(bg), 5 * scale);
-        draw:AddRectFilled({ wx, wy }, { wx + width, wy + 32 * scale }, imgui.GetColorU32(color_alpha(burst.theme.panel_alt, 0.96)), 5 * scale);
-        draw:AddRect({ wx, wy }, { wx + width, wy + height }, imgui.GetColorU32(burst.theme.brass), 5 * scale, 0, math.max(1, scale));
-        draw:AddRectFilled({ wx, wy }, { wx + 6 * scale, wy + height }, imgui.GetColorU32(accent), 4 * scale);
+        draw:AddRectFilled({ wx, wy }, { wx + width, wy + height }, imgui.GetColorU32(bg), 7 * scale);
+        draw:AddRectFilled({ wx, wy }, { wx + width, wy + 34 * scale }, imgui.GetColorU32(color_alpha(burst.theme.panel_alt, 0.97)), 7 * scale);
+        draw:AddRectFilled({ wx + 16 * scale, wy + 78 * scale }, { wx + width - 16 * scale, wy + 145 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.field_bg, 0.86)), 5 * scale);
+        draw:AddRect({ wx, wy }, { wx + width, wy + height }, imgui.GetColorU32(burst.theme.brass), 7 * scale, 0, math.max(1, 1.25 * scale));
+        draw:AddRectFilled({ wx, wy }, { wx + 6 * scale, wy + height }, imgui.GetColorU32(chain_accent), 5 * scale);
+        draw:AddRectFilled({ wx + 16 * scale, wy + 151 * scale }, { wx + width - 16 * scale, wy + 162 * scale },
+            imgui.GetColorU32(burst.theme.field_bg), 3 * scale);
+
         if (appearance_open and burst.preview_visible) then
             imgui.SetCursorScreenPos({ wx, wy }); imgui.InvisibleButton('##burst_preview_drag', { width, height });
             if (imgui.IsItemClicked(0)) then burst.preview_drag_active = true; burst.preview_drag_x, burst.preview_drag_y = imgui.GetMousePos(); end
@@ -451,25 +513,65 @@ local function render_overlay()
                 burst.preview_drag_x, burst.preview_drag_y = mx, my;
             elseif (burst.preview_drag_active and imgui.IsMouseReleased(0)) then burst.preview_drag_active = false; end
         end
+
         imgui.SetCursorScreenPos({ wx + 20 * scale, wy + 8 * scale });
-        imgui.TextColored(accent, tostring(state.property or 'BURST'):upper());
+        imgui.TextColored(burst.theme.brass_hover, (state.confirmed ~= true and not preview) and 'SKILLCHAIN GOAL:' or 'SKILLCHAIN:');
+        imgui.SameLine(); imgui.TextColored(chain_accent, tostring(state.property or 'BURST'):upper());
         imgui.SameLine(); imgui.TextColored(burst.theme.text_muted, '  ' .. tostring(state.target or ''));
-        imgui.SetCursorScreenPos({ wx + 24 * scale, wy + 45 * scale });
-        set_ui_font_scale(1.32 * scale);
-        imgui.TextColored(burst.theme.text, state.spell and (state.status == 'coach' and tostring(state.spell):upper() or ('CAST ' .. tostring(state.spell):upper())) or tostring(state.detail or 'WAIT'));
-        set_ui_font_scale(1.0);
-        imgui.SetCursorScreenPos({ wx + 24 * scale, wy + 82 * scale });
-        imgui.TextColored(accent, tostring(state.detail or ''));
-        if (state.remaining ~= nil and state.status ~= 'success') then
-            imgui.SameLine(); imgui.TextColored(burst.theme.text_muted, string.format('   %.1fs remaining', math.max(0, state.remaining)));
-            local fraction = math.max(0, math.min(1, state.remaining / math.max(0.1, tonumber(burst.settings.timing.burst_window) or 10)));
-            draw:AddRectFilled({ wx + 24 * scale, wy + 111 * scale }, { wx + width - 24 * scale, wy + 121 * scale }, imgui.GetColorU32(burst.theme.field_bg), 2 * scale);
-            draw:AddRectFilled({ wx + 24 * scale, wy + 111 * scale }, { wx + 24 * scale + (width - 48 * scale) * fraction, wy + 121 * scale }, imgui.GetColorU32(accent), 2 * scale);
+
+        imgui.SetCursorScreenPos({ wx + 22 * scale, wy + 47 * scale });
+        imgui.TextColored(burst.theme.text_muted, 'BURST ELEMENTS');
+        local chip_x = wx + 132 * scale;
+        for _, burst_element in ipairs(state.elements or {}) do
+            local chip_color = element_colors[burst_element] or burst.theme.important;
+            local chip_width = math.max(52, 22 + #tostring(burst_element) * 7.2) * scale;
+            draw:AddRectFilled({ chip_x, wy + 42 * scale }, { chip_x + chip_width, wy + 68 * scale },
+                imgui.GetColorU32(color_alpha(chip_color, 0.17)), 4 * scale);
+            draw:AddRect({ chip_x, wy + 42 * scale }, { chip_x + chip_width, wy + 68 * scale },
+                imgui.GetColorU32(color_alpha(chip_color, 0.78)), 4 * scale, 0, math.max(1, scale));
+            draw:AddRectFilled({ chip_x + 5 * scale, wy + 48 * scale }, { chip_x + 8 * scale, wy + 62 * scale },
+                imgui.GetColorU32(chip_color), 2 * scale);
+            imgui.SetCursorScreenPos({ chip_x + 12 * scale, wy + 47 * scale });
+            imgui.TextColored(chip_color, tostring(burst_element):upper());
+            chip_x = chip_x + chip_width + 6 * scale;
         end
+
+        local primary = overlay_primary_text(state);
+        local secondary = overlay_secondary_text(state, primary);
+        imgui.SetCursorScreenPos({ wx + 26 * scale, wy + 88 * scale });
+        set_ui_font_scale(1.18 * scale);
+        imgui.TextColored(burst.theme.text, primary);
+        set_ui_font_scale(1.0);
+        if (secondary ~= nil) then
+            imgui.SetCursorScreenPos({ wx + 26 * scale, wy + 119 * scale });
+            imgui.TextColored(state.status == 'blocked' and burst.theme.danger or accent, secondary);
+        end
+
+        local fraction = state.status == 'success' and 1 or 0;
+        if (state.remaining ~= nil) then
+            fraction = math.max(0, math.min(1, state.remaining / math.max(0.1, tonumber(burst.settings.timing.burst_window) or 10)));
+            local badge_x = wx + width - 104 * scale;
+            draw:AddRectFilled({ badge_x, wy + 88 * scale }, { wx + width - 24 * scale, wy + 135 * scale },
+                imgui.GetColorU32(color_alpha(accent, 0.14)), 5 * scale);
+            draw:AddRect({ badge_x, wy + 88 * scale }, { wx + width - 24 * scale, wy + 135 * scale },
+                imgui.GetColorU32(color_alpha(accent, 0.72)), 5 * scale, 0, math.max(1, scale));
+            imgui.SetCursorScreenPos({ badge_x + 12 * scale, wy + 92 * scale });
+            set_ui_font_scale(1.08 * scale);
+            imgui.TextColored(accent, string.format('%.1fs', math.max(0, state.remaining)));
+            set_ui_font_scale(1.0);
+            imgui.SetCursorScreenPos({ badge_x + 10 * scale, wy + 116 * scale });
+            imgui.TextColored(burst.theme.text_muted, state.status == 'closed' and 'CLOSED' or 'REMAINING');
+        end
+        draw:AddRectFilled({ wx + 16 * scale, wy + 151 * scale },
+            { wx + 16 * scale + (width - 32 * scale) * fraction, wy + 162 * scale }, imgui.GetColorU32(accent), 3 * scale);
+
         if (cfg.show_alternates and state.alternates ~= nil) then
             local names = {};
             for _, alt in ipairs(state.alternates) do if (alt ~= nil) then table.insert(names, alt.name); end end
-            if (#names > 0) then imgui.SetCursorScreenPos({ wx + 24 * scale, wy + 132 * scale }); imgui.TextColored(burst.theme.text_muted, 'Alternates: ' .. table.concat(names, '  ·  ')); end
+            if (#names > 0) then
+                imgui.SetCursorScreenPos({ wx + 22 * scale, wy + 171 * scale });
+                imgui.TextColored(burst.theme.text_muted, 'Alternates: ' .. table.concat(names, '  ·  '));
+            end
         end
     end
     imgui.End();
@@ -664,8 +766,11 @@ local function render_timing_options()
     if (imgui.SliderFloat('Latency Allowance', latency, 0, 1.5, '%.2f sec')) then cfg.latency = latency[1]; save_settings(); end
     local safety = { tonumber(cfg.safety_margin) or 0.60 };
     if (imgui.SliderFloat('Safety Margin', safety, 0.1, 2.0, '%.2f sec')) then cfg.safety_margin = safety[1]; save_settings(); end
+    local linger = { tonumber(cfg.post_window_linger) or 0.50 };
+    if (imgui.SliderFloat('Post-Window Linger', linger, 0.0, 2.0, '%.2f sec')) then cfg.post_window_linger = linger[1]; save_settings(); end
     imgui.Separator();
     imgui.TextColored(burst.theme.text_muted, 'Retail resource cast times are read as CastTime / 4. Fast Cast, latency, and this safety margin are then applied before ranking.');
+    imgui.TextColored(burst.theme.text_muted, 'Post-Window Linger controls how briefly WINDOW CLOSED remains visible after the timer reaches zero.');
 end
 
 local function filtered_spells()
@@ -753,7 +858,7 @@ local function render_appearance_options()
     imgui.SameLine();
     if (imgui.Button('Reset Card Position')) then
         local display = imgui.GetIO().DisplaySize;
-        cfg.position_x = math.floor((display.x - 590 * get_ui_scale()) / 2);
+        cfg.position_x = math.floor((display.x - 620 * get_ui_scale()) / 2);
         cfg.position_y = math.floor(display.y * 0.22);
         burst.preview_visible = true; run_preview('ready'); save_settings();
     end
@@ -765,8 +870,10 @@ local function render_appearance_options()
     local edges = cfg.edge_enabled == true;
     if (imgui.Checkbox('Enable Element-Colored Screen Edges', { edges })) then cfg.edge_enabled = not edges; save_settings(); end
     if (cfg.edge_enabled) then
-        local intensity = { tonumber(cfg.edge_intensity) or 0.65 };
+        local intensity = { tonumber(cfg.edge_intensity) or 0.72 };
         if (imgui.SliderFloat('Edge Intensity', intensity, 0, 1, '%.2f')) then cfg.edge_intensity = intensity[1]; save_settings(); end
+        if (imgui.Button('Test Edge Cue')) then burst.preview_visible = true; run_preview('ready'); end
+        imgui.SameLine(); imgui.TextColored(burst.theme.text_muted, 'Shows a confirmed Fragmentation cue.');
     end
     local motion = cfg.reduced_motion == true;
     if (imgui.Checkbox('Reduced Motion', { motion })) then cfg.reduced_motion = not motion; save_settings(); end
@@ -811,6 +918,7 @@ local function diagnostics_results()
     check(result == 'Darkness', 'Distortion + Gravitation should create Darkness');
     check(skillchains.from_additional_effect({ message = 291, damage = 4 }) == 'Fragmentation', 'Additional-effect property decode');
     check(skillchains.from_additional_effect({ message = 1, damage = 4 }) == nil, 'Reject non-skillchain additional effect');
+    check(table.concat(skillchains.elements('Light'), ',') == 'Fire,Wind,Lightning,Light', 'Light burst-element list');
     check(#spell_catalog.entries >= 100, 'Spell catalog size');
     check(spell_catalog.by_name['thunder v'] ~= nil, 'Thunder V catalog entry');
     return checks, failures;

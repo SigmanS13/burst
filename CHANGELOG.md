@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.5 — 2026-08-24
+
+- Added advisory-only target elemental-weakness scoring with a default-on `+100` ranking bonus; explicit preferred elements remain stronger at `+120`.
+- Added case-insensitive, schema-validated named overrides from optional `Ashita/config/addons/burst/weaknesses.lua` with safe missing-file behavior and manual reload support.
+- Added a sparse verified numeric-race/model data layer without guessing ecosystem mappings that Ashita does not expose directly.
+- Added numeric Race and Look-field diagnostics for live mapping validation, detailed override warnings, synthetic self-tests, and a `Test Weakness` card preview.
+- Added restrained live-card weakness highlighting, `★ WEAK` recommendation tags, and a centered target-weakness icon row in the Burst Coach.
+- Preserved empty weakness lists as explicit overrides that suppress lower-priority fallback data.
+
 ## 0.2.4 — 2026-08-24
 
 - Centered the `SKILL CHAIN:` heading and property inside a dedicated title plaque below the ornamental border.

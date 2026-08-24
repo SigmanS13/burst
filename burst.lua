@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.2.4';
+addon.version   = '0.2.5';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 
@@ -20,6 +20,7 @@ local planner = require('core.planner');
 local skillchains = require('data.skillchains');
 local spell_catalog = require('data.spells');
 local skills = require('data.skills');
+local weaknesses = require('data.weaknesses');
 local ui_theme = require('ui.theme');
 local element_icons = require('ui.element_icons');
 local launcher_icon = require('ui.launcher_icon');
@@ -32,6 +33,7 @@ local default_settings = T{
         target_policy = 'current', -- current / any
         preferred_element = 'Auto',
         preferred_family = 'Any',
+        use_target_weakness = true,
         mp_reserve = 100,
         max_range = 21.0,
         disabled_spells = T{},
@@ -232,6 +234,23 @@ local function reload_theme()
     launcher_icon.load(ui_theme.launcher_path(burst.theme));
 end
 
+local function weakness_override_path()
+    if (AshitaCore == nil or AshitaCore.GetInstallPath == nil) then return nil; end
+    return string.format('%s\\config\\addons\\burst\\weaknesses.lua', AshitaCore:GetInstallPath());
+end
+
+local function reload_weakness_overrides()
+    local path = weakness_override_path();
+    if (path == nil) then
+        weaknesses.overrides = {};
+        weaknesses.load_status = {
+            state = 'error', path = nil, entries = 0, warnings = {}, error = 'Ashita install path unavailable',
+        };
+        return false;
+    end
+    return weaknesses.load_overrides(path);
+end
+
 local function color_alpha(color, alpha)
     return { color[1], color[2], color[3], math.max(0, math.min(1, alpha or color[4] or 1)) };
 end
@@ -333,6 +352,34 @@ local function render_element_labels(elements, icon_size, uppercase)
     end
 end
 
+local function content_region_width()
+    if (type(imgui.GetContentRegionAvail) ~= 'function') then return 0; end
+    local ok, first, second = pcall(imgui.GetContentRegionAvail);
+    if (not ok) then return 0; end
+    if (type(first) == 'table') then return tonumber(first.x or first[1]) or 0; end
+    if (type(first) == 'number') then return first; end
+    local member_ok, width = pcall(function () return tonumber(first.x); end);
+    return member_ok and (width or 0) or 0;
+end
+
+local function render_centered_element_row(label, elements, icon_size)
+    elements = elements or {};
+    if (#elements == 0) then return; end
+    icon_size = tonumber(icon_size) or (19 * get_ui_scale());
+    local gap = 9 * get_ui_scale();
+    local width = measured_text_width(label) + 12 * get_ui_scale();
+    for index, element in ipairs(elements) do
+        if (index > 1) then width = width + gap; end
+        if (element_icons.has(element)) then width = width + icon_size + 4 * get_ui_scale(); end
+        width = width + measured_text_width(tostring(element));
+    end
+    local available = content_region_width();
+    if (available > width) then imgui.SetCursorPosX(imgui.GetCursorPosX() + (available - width) / 2); end
+    imgui.TextColored(burst.theme.text_muted, label);
+    imgui.SameLine(0, 12 * get_ui_scale());
+    render_element_labels(elements, icon_size, false);
+end
+
 --------------------------------------------------------------------------------------------------
 -- Sound
 --------------------------------------------------------------------------------------------------
@@ -407,11 +454,13 @@ local function update_recommendation()
     local current = player_state.current_target();
     local chain = burst.tracker:best_chain(current and current.id or nil, burst.settings.advisor.target_policy);
     burst.current_chain = chain;
+    local target = chain and player_state.target_by_id(chain.target_id) or nil;
     if (chain ~= nil and chain.success == true and chain.success_at ~= nil and os.clock() - chain.success_at <= 2.5) then
-        burst.recommendation = { status = 'success', reason = 'MAGIC BURST CONFIRMED', remaining = 0, best = { name = chain.success_spell } };
+        local weakness, weakness_source = weaknesses.lookup(target);
+        burst.recommendation = { status = 'success', reason = 'MAGIC BURST CONFIRMED', remaining = 0,
+            best = { name = chain.success_spell }, weakness = weakness, weakness_source = weakness_source };
         return;
     end
-    local target = chain and player_state.target_by_id(chain.target_id) or nil;
     burst.recommendation = advisor.recommend(chain, combined_advisor_settings(), player_state, target, os.clock());
 end
 
@@ -461,6 +510,10 @@ local function run_preview(kind)
     elseif (kind == 'blocked') then
         burst.preview_state = { status = 'blocked', property = 'Light', target = 'Shadow Lord', spell = nil,
             detail = 'NOT LEARNED', elements = skillchains.elements('Light'), remaining = 2.3, started = now };
+    elseif (kind == 'weakness') then
+        burst.preview_state = { status = 'ready', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V',
+            detail = 'CAST NOW', elements = skillchains.elements('Fragmentation'), weak_elements = { 'Lightning' },
+            weak_hit = true, remaining = 6.8, started = now };
     else
         burst.preview_state = { status = 'ready', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V',
             detail = 'CAST NOW', elements = skillchains.elements('Fragmentation'), remaining = 6.8, started = now };
@@ -520,7 +573,8 @@ local function overlay_content()
     if (burst.settings.enabled == true and chain ~= nil and rec ~= nil and rec.status ~= 'idle') then
         local state = { property = chain.property, target = chain.target_name, status = rec.status, confirmed = true,
             detail = rec.reason, remaining = rec.remaining, elements = chain.elements };
-        if (rec.best ~= nil) then state.spell = rec.best.name; end
+        if (rec.weakness ~= nil) then state.weak_elements = rec.weakness.weak; end
+        if (rec.best ~= nil) then state.spell = rec.best.name; state.weak_hit = rec.best.weak_hit == true; end
         if (rec.alternates ~= nil) then state.alternates = rec.alternates; end
         return state, false;
     end
@@ -549,7 +603,9 @@ local function overlay_primary_text(state)
     if (state.status == 'closed') then return 'WINDOW CLOSED'; end
     if (state.spell ~= nil) then
         if (state.status == 'coach') then return tostring(state.spell):upper(); end
-        return 'CAST ' .. tostring(state.spell):upper();
+        local text = 'CAST ' .. tostring(state.spell):upper();
+        if (state.weak_hit == true) then text = text .. '  ★ WEAK'; end
+        return text;
     end
     local detail = tostring(state.detail or 'WAIT');
     if (detail == 'NOT LEARNED') then return 'NO MATCHING SPELL LEARNED'; end
@@ -671,6 +727,8 @@ local function render_overlay()
         local chip_gap = 6 * scale;
         local label_gap = 14 * scale;
         local chip_layout = {};
+        local weak_elements = {};
+        for _, weak_element in ipairs(state.weak_elements or {}) do weak_elements[weak_element] = true; end
         local elements_width = element_label_width;
         if (#(state.elements or {}) > 0) then elements_width = elements_width + label_gap; end
         for index, burst_element in ipairs(state.elements or {}) do
@@ -694,12 +752,14 @@ local function render_overlay()
         for _, layout in ipairs(chip_layout) do
             local burst_element = layout.element;
             local chip_color = element_colors[burst_element] or burst.theme.important;
+            local weak_match = weak_elements[burst_element] == true;
             local chip_text, chip_text_width = layout.text, layout.text_width;
             local icon_size, has_icon, icon_space, chip_width = layout.icon_size, layout.has_icon, layout.icon_space, layout.width;
             draw:AddRectFilled({ chip_x + 3 * scale, wy + 42 * scale }, { chip_x + chip_width - 3 * scale, wy + 68 * scale },
-                imgui.GetColorU32(color_alpha(chip_color, 0.17)), 1 * scale);
+                imgui.GetColorU32(color_alpha(chip_color, weak_match and 0.34 or 0.17)), 1 * scale);
             draw_chamfered_frame(draw, chip_x, wy + 42 * scale, chip_x + chip_width, wy + 68 * scale,
-                5 * scale, imgui.GetColorU32(color_alpha(chip_color, 0.90)), math.max(1, scale));
+                5 * scale, imgui.GetColorU32(color_alpha(weak_match and burst.theme.brass_hover or chip_color, 0.95)),
+                math.max(1, weak_match and 1.45 * scale or scale));
             local content_width = chip_text_width + icon_space;
             local content_x = chip_x + math.max(8 * scale, (chip_width - content_width) / 2);
             if (has_icon and not element_icons.draw_at(burst_element, content_x, wy + 44 * scale, icon_size)) then
@@ -802,6 +862,9 @@ local function render_coach_tab()
         imgui.TextColored(burst.theme.brass_hover, tostring(chain.property):upper() .. ' — ' .. tostring(chain.target_name));
         imgui.Text('Burst elements:'); imgui.SameLine();
         render_element_labels(chain.elements, 19 * get_ui_scale(), false);
+        if (rec.weakness ~= nil and #(rec.weakness.weak or {}) > 0) then
+            render_centered_element_row('TARGET WEAK', rec.weakness.weak, 19 * get_ui_scale());
+        end
         imgui.Text(string.format('Window: %.1fs remaining', math.max(0, chain.expires_at - os.clock())));
         imgui.Separator();
         if (rec.status == 'success') then
@@ -809,7 +872,9 @@ local function render_coach_tab()
             if ((tonumber(chain.success_damage) or 0) > 0) then imgui.Text('Damage: ' .. tostring(chain.success_damage)); end
         elseif (rec.best ~= nil) then
             if (element_icons.draw(rec.best.element, 28 * get_ui_scale())) then imgui.SameLine(0, 7 * get_ui_scale()); end
-            imgui.TextColored(element_colors[rec.best.element] or burst.theme.important, 'CAST ' .. rec.best.name:upper());
+            local recommendation_text = 'CAST ' .. rec.best.name:upper();
+            if (rec.best.weak_hit == true) then recommendation_text = recommendation_text .. '  ★ WEAK'; end
+            imgui.TextColored(element_colors[rec.best.element] or burst.theme.important, recommendation_text);
             imgui.Text(string.format('Estimated landing: %.2fs   Latest safe start: %.2fs', rec.best.cast_time, rec.best.latest_start));
             imgui.Text(string.format('MP: %d   Family: %s', rec.best.mp, rec.best.family));
             if (#rec.alternates > 0) then
@@ -824,6 +889,7 @@ local function render_coach_tab()
     end
     imgui.Spacing(); imgui.Separator();
     if (imgui.Button('Test Fragmentation')) then run_preview('ready'); end
+    imgui.SameLine(); if (imgui.Button('Test Weakness')) then run_preview('weakness'); end
     imgui.SameLine(); if (imgui.Button('Test Blocked')) then run_preview('blocked'); end
     imgui.SameLine(); if (imgui.Button('Test Success')) then run_preview('success'); end
     imgui.Separator();
@@ -952,6 +1018,25 @@ local function render_advisor_options()
     if (did) then cfg.preferred_element = element; save_settings(); end
     local family, did_family = combo_value('Preferred Spell Family##burst_preferred_family', cfg.preferred_family, spell_catalog.families);
     if (did_family) then cfg.preferred_family = family; save_settings(); end
+    local use_weakness = cfg.use_target_weakness ~= false;
+    if (imgui.Checkbox('Use Target Weakness In Ranking', { use_weakness })) then
+        cfg.use_target_weakness = not use_weakness; save_settings();
+    end
+    imgui.TextColored(burst.theme.text_muted, 'Target weakness adds +100. An explicit preferred element remains slightly stronger at +120.');
+    if (imgui.Button('Reload Weakness Overrides')) then
+        reload_weakness_overrides();
+    end
+    local weakness_status = weaknesses.load_status or {};
+    if (weakness_status.state == 'loaded') then
+        local warning_count = #(weakness_status.warnings or {});
+        imgui.TextColored(warning_count > 0 and burst.theme.danger or burst.theme.success,
+            string.format('Overrides: %d loaded%s', tonumber(weakness_status.entries) or 0,
+                warning_count > 0 and string.format(' — %d warning(s)', warning_count) or ''));
+    elseif (weakness_status.state == 'error') then
+        imgui.TextColored(burst.theme.danger, 'Overrides: ' .. tostring(weakness_status.error or 'load error'));
+    else
+        imgui.TextColored(burst.theme.text_muted, 'Overrides: no user file found; verified shipped data only.');
+    end
     local reserve = { tonumber(cfg.mp_reserve) or 100 };
     if (imgui.SliderInt('MP Reserve', reserve, 0, 1000, '%d MP')) then cfg.mp_reserve = reserve[1]; save_settings(); end
     local range = { tonumber(cfg.max_range) or 21.0 };
@@ -1129,6 +1214,17 @@ local function diagnostics_results()
     check(table.concat(skillchains.elements('Light'), ',') == 'Fire,Wind,Lightning,Light', 'Light burst-element list');
     check(#spell_catalog.entries >= 100, 'Spell catalog size');
     check(spell_catalog.by_name['thunder v'] ~= nil, 'Thunder V catalog entry');
+    local normalized, weakness_warnings, weakness_count = weaknesses.normalize_overrides({
+        ['Synthetic Crab'] = { weak = { 'thunder', 'Bogus', 'Lightning' } },
+        ['Known Neutral'] = { weak = {} },
+    });
+    local weakness_profile, weakness_source = weaknesses.lookup({ name = 'synthetic crab', race = 9999 }, normalized);
+    check(weakness_count == 2, 'Weakness override count');
+    check(weakness_profile ~= nil and table.concat(weakness_profile.weak, ',') == 'Lightning', 'Weakness normalization and deduplication');
+    check(weakness_source == 'override', 'Named weakness override priority');
+    check(#weakness_warnings == 1, 'Invalid weakness element warning');
+    weakness_profile = select(1, weaknesses.lookup({ name = 'KNOWN NEUTRAL', race = 9999 }, normalized));
+    check(weakness_profile ~= nil and #weakness_profile.weak == 0, 'Empty weakness override suppresses fallback');
     return checks, failures;
 end
 
@@ -1137,8 +1233,31 @@ local function render_diagnostics_options()
     imgui.TextColored(burst.theme.brass_hover, 'Diagnostics');
     imgui.Text(string.format('Player: %s  —  %s', player_state.character_name(), player_state.job_text()));
     local target = player_state.current_target();
-    imgui.Text(target and string.format('Target: %s  ID %u  %.1f yalms  %d%% HP', target.name, target.id, target.distance, target.hpp)
+    imgui.Text(target and string.format('Target: %s  ID %u  Race %s  %.1f yalms  %d%% HP', target.name, target.id,
+        tostring(target.race or 'unknown'), target.distance, target.hpp)
         or 'Target: none');
+    if (target ~= nil and target.entity ~= nil and target.entity.Look ~= nil) then
+        local ok, look_text = pcall(function ()
+            local look = target.entity.Look;
+            return string.format('Look fields: Hair %s  Head %s  Body %s  Hands %s  Legs %s  Feet %s',
+                tostring(look.Hair), tostring(look.Head), tostring(look.Body), tostring(look.Hands),
+                tostring(look.Legs), tostring(look.Feet));
+        end);
+        if (ok) then imgui.TextColored(burst.theme.text_muted, look_text); end
+    end
+    if (target ~= nil) then
+        local weakness_profile, weakness_source = weaknesses.lookup(target);
+        if (weakness_profile ~= nil) then
+            imgui.Text('Weakness source: ' .. tostring(weakness_source)); imgui.SameLine();
+            if (#(weakness_profile.weak or {}) > 0) then
+                render_element_labels(weakness_profile.weak, 17 * get_ui_scale(), false);
+            else
+                imgui.TextColored(burst.theme.text_muted, 'explicitly empty');
+            end
+        else
+            imgui.TextColored(burst.theme.text_muted, 'Weakness source: no verified match');
+        end
+    end
     imgui.Separator();
     imgui.Text(string.format('0x028 parsed: %d   duplicates: %d   parse errors: %d', stats.parsed, stats.duplicates, stats.parse_errors));
     imgui.Text(string.format('Actors ignored outside alliance/pets: %d', stats.ignored_actors or 0));
@@ -1147,6 +1266,17 @@ local function render_diagnostics_options()
         element_icons.error and (' — ' .. element_icons.error) or ''));
     imgui.Text(string.format('Launcher artwork: %s%s', launcher_icon.has() and 'loaded' or 'text fallback',
         launcher_icon.error and (' — ' .. launcher_icon.error) or ''));
+    local weakness_status = weaknesses.load_status or {};
+    imgui.Text(string.format('Weakness overrides: %s  entries: %d  warnings: %d%s',
+        tostring(weakness_status.state or 'unknown'), tonumber(weakness_status.entries) or 0,
+        #(weakness_status.warnings or {}), weakness_status.error and (' — ' .. tostring(weakness_status.error)) or ''));
+    for index, warning in ipairs(weakness_status.warnings or {}) do
+        if (index > 5) then
+            imgui.TextColored(burst.theme.text_muted, string.format('...and %d more weakness warning(s).', #weakness_status.warnings - 5));
+            break;
+        end
+        imgui.TextWrapped('Weakness warning: ' .. tostring(warning));
+    end
     imgui.Text('Last layout: ' .. tostring(burst.tracker.last_layout));
     imgui.TextWrapped('Last event: ' .. tostring(burst.tracker.last_event));
     imgui.Separator();
@@ -1305,7 +1435,7 @@ end
 
 ashita.events.register('load', 'burst_load_cb', function ()
     burst.settings = settings.load(default_settings, 'burst_settings');
-    ensure_settings(); sync_profile(); reload_theme(); element_icons.load(addon.path); refresh_sounds(false);
+    ensure_settings(); sync_profile(); reload_theme(); reload_weakness_overrides(); element_icons.load(addon.path); refresh_sounds(false);
     settings.register('burst_settings', 'burst_settings_update_cb', function (new_settings)
         if (new_settings ~= nil) then burst.settings = new_settings; burst.profile_key = nil; ensure_settings(); sync_profile(); reload_theme(); end
     end);

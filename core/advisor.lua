@@ -1,4 +1,5 @@
 local catalog = require('data.spells');
+local weaknesses = require('data.weaknesses');
 
 local M = {};
 
@@ -11,11 +12,16 @@ function M.recommend(chain, settings, player_state, target, now)
     now = tonumber(now) or os.clock();
     if (chain == nil) then return { status = 'idle', reason = 'WAITING FOR A CONFIRMED SKILLCHAIN', valid = {}, rejected = {} }; end
     if (target == nil) then return { status = 'blocked', reason = 'SKILLCHAIN TARGET IS NOT LOADED', valid = {}, rejected = {} }; end
+    local weakness, weakness_source = weaknesses.lookup(target);
     if (settings.target_policy == 'current') then
         local current = player_state.current_target();
-        if (current == nil) then return { status = 'blocked', reason = 'NO CURRENT TARGET', valid = {}, rejected = {} }; end
+        if (current == nil) then
+            return { status = 'blocked', reason = 'NO CURRENT TARGET', valid = {}, rejected = {},
+                weakness = weakness, weakness_source = weakness_source };
+        end
         if (tonumber(current.id) ~= tonumber(chain.target_id)) then
-            return { status = 'blocked', reason = 'WRONG TARGET — SKILLCHAIN IS ON ' .. tostring(chain.target_name), valid = {}, rejected = {} };
+            return { status = 'blocked', reason = 'WRONG TARGET — SKILLCHAIN IS ON ' .. tostring(chain.target_name), valid = {}, rejected = {},
+                weakness = weakness, weakness_source = weakness_source };
         end
     end
 
@@ -41,6 +47,10 @@ function M.recommend(chain, settings, player_state, target, now)
                 candidate.score = tonumber(entry.score) or 0;
                 if (preferred_element ~= 'Auto' and preferred_element == entry.element) then candidate.score = candidate.score + 120; end
                 if (preferred_family ~= 'Any' and preferred_family == entry.family) then candidate.score = candidate.score + 30; end
+                if (weakness ~= nil and contains(weakness.weak, entry.element)) then
+                    candidate.weak_hit = true;
+                    if (settings.use_target_weakness ~= false) then candidate.score = candidate.score + 100; end
+                end
                 if (candidate.latest_start < 0) then
                     candidate.reason = string.format('TOO LATE — NEEDS %.1fs', candidate.cast_time + safety);
                     table.insert(rejected, candidate);
@@ -64,12 +74,13 @@ function M.recommend(chain, settings, player_state, target, now)
 
     if (#valid == 0) then
         local reason = rejected[1] and rejected[1].reason or 'NO ENABLED SPELL MATCHES THESE ELEMENTS';
-        return { status = 'blocked', reason = reason, valid = valid, rejected = rejected, remaining = remaining };
+        return { status = 'blocked', reason = reason, valid = valid, rejected = rejected, remaining = remaining,
+            weakness = weakness, weakness_source = weakness_source };
     end
     return {
         status = remaining <= 2.0 and 'urgent' or 'ready', reason = 'CAST NOW',
         best = valid[1], alternates = { valid[2], valid[3] }, valid = valid,
-        rejected = rejected, remaining = remaining,
+        rejected = rejected, remaining = remaining, weakness = weakness, weakness_source = weakness_source,
     };
 end
 

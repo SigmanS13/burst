@@ -1,4 +1,4 @@
-# Burst 0.2.4
+# Burst 0.2.5
 
 Burst is a manual magic-burst advisor and optional skillchain coach for **retail FFXI on Ashita v4**. It observes incoming combat data, recommends an action, and leaves every spell, weaponskill, target choice, and equipment change to the player.
 
@@ -47,6 +47,36 @@ After a confirmed skillchain on a valid loaded enemy, Burst:
 - Adds the supplied elemental icons beside their names in the combat card and uses smaller contextual icons in the coach, planner, and selected-spell detail views.
 - Preserves text labels and color coding so elemental guidance remains understandable without relying on icon recognition alone.
 - Shows `WINDOW CLOSED` for 0.5 seconds by default, then dismisses the combat card.
+
+### Elemental weakness guidance
+
+When Burst has verified weakness data for the loaded skillchain target, it:
+
+- Adds `+100` to usable spells matching a weak element without filtering or blocking any other spell.
+- Keeps an explicitly preferred element slightly stronger at `+120`.
+- Highlights matching burst-element icons and marks a matching recommendation with `★ WEAK`.
+- Shows a centered `TARGET WEAK` icon row in the Burst Coach dashboard.
+
+Weakness ranking is enabled by default and can be disabled under **Options → Advisor** without hiding the available weakness information.
+
+Ashita exposes a numeric entity `Race` value rather than ecosystem labels such as Aquan or Undead. The shipped `data/mob_families.lua` therefore remains deliberately sparse and accepts only mappings that have been verified. **Options → Diagnostics** shows the current target's numeric Race and Look fields to support future validation.
+
+Named NM or family exceptions can be placed in:
+
+```text
+Ashita/config/addons/burst/weaknesses.lua
+```
+
+The file is optional, missing-safe, case-insensitive by target name, and data-only:
+
+```lua
+return {
+    ['Serket'] = { weak = { 'Ice' } },
+    ['Example Neutral Target'] = { weak = {} },
+};
+```
+
+Valid element names are `Fire`, `Ice`, `Wind`, `Earth`, `Lightning`, `Water`, `Light`, and `Dark`. `Thunder` normalizes to `Lightning`; `Void` normalizes to `Dark`. Invalid records are ignored and reported in Diagnostics. An explicitly empty `weak` list suppresses any lower-priority shipped fallback. Use **Reload Weakness Overrides** after editing the file; reloading the addon is not required.
 
 The default target policy is **Current Target Only**. This prevents a chain elsewhere in a crowded fight from telling you to cast on the wrong enemy.
 

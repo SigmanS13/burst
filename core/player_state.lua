@@ -84,20 +84,24 @@ function M.current_target()
     local index = target_manager:GetTargetIndex(0);
     local entity = GetEntity(index);
     if (entity == nil or tonumber(entity.ServerId) == 0) then return nil; end
+    local race = tonumber(entity.Race);
     return {
         id = tonumber(entity.ServerId), index = index, entity = entity,
         name = clean_name(entity.Name), hpp = tonumber(entity.HPPercent) or 0,
         distance = math.sqrt(math.max(0, tonumber(entity.Distance) or 0)),
+        race = race, race_id = race,
     };
 end
 
 function M.target_by_id(server_id)
     local entity, index = M.entity_by_server_id(server_id);
     if (entity == nil) then return nil; end
+    local race = tonumber(entity.Race);
     return {
         id = tonumber(entity.ServerId), index = index, entity = entity,
         name = clean_name(entity.Name), hpp = tonumber(entity.HPPercent) or 0,
         distance = math.sqrt(math.max(0, tonumber(entity.Distance) or 0)),
+        race = race, race_id = race,
     };
 end
 

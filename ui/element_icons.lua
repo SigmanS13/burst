@@ -67,7 +67,15 @@ function M.draw(element, size)
     if (M.render_disabled) then return false; end
     local texture = M.textures[tostring(element or '')];
     if (texture == nil) then return false; end
-    local ok = pcall(imgui.Image, texture, { size, size });
+    -- Ashita v4's ImGui binding accepts a numeric Direct3D texture ID. Passing
+    -- the LuaJIT cdata pointer itself can render as an untextured white quad.
+    local texture_id = tonumber(ffi.cast('uint32_t', texture));
+    if (texture_id == nil or texture_id == 0) then
+        M.error = 'An element texture handle is invalid.';
+        return false;
+    end
+    local ok = pcall(imgui.Image, texture_id, { size, size },
+        { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 });
     if (not ok) then
         M.render_disabled = true;
         M.error = 'This Ashita ImGui build rejected the element texture.';

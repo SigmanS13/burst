@@ -1,4 +1,4 @@
-# Burst 0.2.2
+# Burst 0.2.3
 
 Burst is a manual magic-burst advisor and optional skillchain coach for **retail FFXI on Ashita v4**. It observes incoming combat data, recommends an action, and leaves every spell, weaponskill, target choice, and equipment change to the player.
 

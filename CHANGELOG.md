@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 — 2026-08-24
+
+- Fixed the launcher artwork rendering as a solid white rectangle in Ashita v4.
+- Converted Direct3D texture pointers to the numeric 32-bit texture IDs required by Ashita's ImGui binding.
+- Applied the same correction to all eight elemental icons before they are displayed.
+
 ## 0.2.2 — 2026-08-23
 
 - Replaced the generated circular `B` medallion with the user-supplied Burst logo artwork.

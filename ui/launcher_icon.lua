@@ -45,7 +45,15 @@ end
 
 function M.draw(width, height)
     if (not M.has()) then return false; end
-    local ok = pcall(imgui.Image, M.texture, { width, height or width });
+    -- Ashita v4's ImGui binding expects the numeric Direct3D texture ID, not the
+    -- LuaJIT cdata pointer wrapper. Passing the wrapper renders a solid white quad.
+    local texture_id = tonumber(ffi.cast('uint32_t', M.texture));
+    if (texture_id == nil or texture_id == 0) then
+        M.error = 'Launcher texture handle is invalid';
+        return false;
+    end
+    local ok = pcall(imgui.Image, texture_id, { width, height or width },
+        { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 });
     if (not ok) then
         M.render_disabled = true;
         M.error = 'This Ashita ImGui build rejected the launcher texture';

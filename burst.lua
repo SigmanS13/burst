@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.2.2';
+addon.version   = '0.2.3';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 

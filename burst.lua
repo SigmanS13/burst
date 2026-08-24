@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.2.3';
+addon.version   = '0.2.4';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 
@@ -639,25 +639,63 @@ local function render_overlay()
             elseif (burst.preview_drag_active and imgui.IsMouseReleased(0)) then burst.preview_drag_active = false; end
         end
 
-        imgui.SetCursorScreenPos({ wx + 20 * scale, wy + 8 * scale });
-        imgui.TextColored(burst.theme.brass_hover, (state.confirmed ~= true and not preview) and 'SKILL CHAIN GOAL:' or 'SKILL CHAIN:');
-        imgui.SameLine(); imgui.TextColored(chain_accent, tostring(state.property or 'BURST'):upper());
-        imgui.SameLine(); imgui.TextColored(burst.theme.text_muted, '  ' .. tostring(state.target or ''));
+        local heading_label = (state.confirmed ~= true and not preview) and 'SKILL CHAIN GOAL:' or 'SKILL CHAIN:';
+        local heading_property = tostring(state.property or 'BURST'):upper();
+        local heading_gap = 7 * scale;
+        local heading_width = measured_text_width(heading_label) + heading_gap + measured_text_width(heading_property);
+        local heading_x = wx + math.max(20 * scale, (width - heading_width) / 2);
+        local heading_y = wy + 14 * scale;
+        local plaque_x1 = heading_x - 11 * scale;
+        local plaque_x2 = heading_x + heading_width + 11 * scale;
+        draw:AddRectFilled({ plaque_x1, wy + 6 * scale }, { plaque_x2, wy + 37 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.panel_alt, 0.99)), 2 * scale);
+        draw_chamfered_frame(draw, plaque_x1, wy + 6 * scale, plaque_x2, wy + 37 * scale,
+            5 * scale, imgui.GetColorU32(color_alpha(burst.theme.brass_dim, 0.90)), math.max(1, scale));
+        imgui.SetCursorScreenPos({ heading_x, heading_y });
+        imgui.TextColored(burst.theme.brass_hover, heading_label);
+        imgui.SameLine(0, heading_gap); imgui.TextColored(chain_accent, heading_property);
+
+        local target_right = wx + width - 22 * scale;
+        local target_available = target_right - plaque_x2 - 12 * scale;
+        if (target_available >= 42 * scale and tostring(state.target or '') ~= '') then
+            local target_text = fit_overlay_text(tostring(state.target), target_available);
+            local target_width = measured_text_width(target_text);
+            imgui.SetCursorScreenPos({ target_right - target_width, heading_y });
+            imgui.TextColored(burst.theme.text_muted, target_text);
+        end
 
         local chip_font_scale = math.max(0.68, math.min(1.0, scale));
         set_ui_font_scale(chip_font_scale);
         local element_label = scale < 0.68 and 'ELEMENTS' or 'BURST ELEMENTS';
-        imgui.SetCursorScreenPos({ wx + 22 * scale, wy + 47 * scale });
-        imgui.TextColored(burst.theme.text_muted, element_label);
-        local chip_x = wx + 22 * scale + measured_text_width(element_label) + 14 * scale;
-        for _, burst_element in ipairs(state.elements or {}) do
-            local chip_color = element_colors[burst_element] or burst.theme.important;
+        local element_label_width = measured_text_width(element_label);
+        local chip_gap = 6 * scale;
+        local label_gap = 14 * scale;
+        local chip_layout = {};
+        local elements_width = element_label_width;
+        if (#(state.elements or {}) > 0) then elements_width = elements_width + label_gap; end
+        for index, burst_element in ipairs(state.elements or {}) do
             local chip_text = tostring(burst_element):upper();
             local chip_text_width = measured_text_width(chip_text);
             local icon_size = 22 * scale;
             local has_icon = element_icons.has(burst_element);
             local icon_space = has_icon and (icon_size + 6 * scale) or 0;
             local chip_width = math.max(52 * scale, chip_text_width + icon_space + 20 * scale);
+            chip_layout[index] = {
+                element = burst_element, text = chip_text, text_width = chip_text_width,
+                icon_size = icon_size, icon_space = icon_space, has_icon = has_icon, width = chip_width,
+            };
+            elements_width = elements_width + chip_width;
+            if (index > 1) then elements_width = elements_width + chip_gap; end
+        end
+        local row_x = wx + math.max(22 * scale, (width - elements_width) / 2);
+        imgui.SetCursorScreenPos({ row_x, wy + 47 * scale });
+        imgui.TextColored(burst.theme.text_muted, element_label);
+        local chip_x = row_x + element_label_width + label_gap;
+        for _, layout in ipairs(chip_layout) do
+            local burst_element = layout.element;
+            local chip_color = element_colors[burst_element] or burst.theme.important;
+            local chip_text, chip_text_width = layout.text, layout.text_width;
+            local icon_size, has_icon, icon_space, chip_width = layout.icon_size, layout.has_icon, layout.icon_space, layout.width;
             draw:AddRectFilled({ chip_x + 3 * scale, wy + 42 * scale }, { chip_x + chip_width - 3 * scale, wy + 68 * scale },
                 imgui.GetColorU32(color_alpha(chip_color, 0.17)), 1 * scale);
             draw_chamfered_frame(draw, chip_x, wy + 42 * scale, chip_x + chip_width, wy + 68 * scale,
@@ -670,7 +708,7 @@ local function render_overlay()
             end
             imgui.SetCursorScreenPos({ content_x + (has_icon and icon_space or 0), wy + 47 * scale });
             imgui.TextColored(chip_color, chip_text);
-            chip_x = chip_x + chip_width + 6 * scale;
+            chip_x = chip_x + chip_width + chip_gap;
         end
         set_ui_font_scale(1.0);
 
@@ -686,14 +724,20 @@ local function render_overlay()
             badge_x = wx + width - 24 * scale - badge_width;
         end
         local action_text_width = math.max(60 * scale, badge_x - (wx + 26 * scale) - 14 * scale);
-        imgui.SetCursorScreenPos({ wx + 26 * scale, wy + 88 * scale });
+        local action_left = wx + 26 * scale;
+        local action_center = action_left + action_text_width / 2;
         set_ui_font_scale(1.18 * scale);
-        imgui.TextColored(burst.theme.text, fit_overlay_text(primary, action_text_width));
+        local fitted_primary = fit_overlay_text(primary, action_text_width);
+        local primary_width = measured_text_width(fitted_primary);
+        imgui.SetCursorScreenPos({ math.max(action_left, action_center - primary_width / 2), wy + 88 * scale });
+        imgui.TextColored(burst.theme.text, fitted_primary);
         set_ui_font_scale(1.0);
         if (secondary ~= nil) then
-            imgui.SetCursorScreenPos({ wx + 26 * scale, wy + 119 * scale });
+            local fitted_secondary = fit_overlay_text(secondary, action_text_width);
+            local secondary_width = measured_text_width(fitted_secondary);
+            imgui.SetCursorScreenPos({ math.max(action_left, action_center - secondary_width / 2), wy + 119 * scale });
             imgui.TextColored(state.status == 'blocked' and burst.theme.danger or accent,
-                fit_overlay_text(secondary, action_text_width));
+                fitted_secondary);
         end
 
         local fraction = state.status == 'success' and 1 or 0;
@@ -1174,13 +1218,19 @@ local function render_launcher()
     if (imgui.Begin('##burst_launcher', true, flags)) then
         local x, y = imgui.GetCursorScreenPos();
         local draw = imgui.GetWindowDrawList();
-        local inset = math.max(4, 5 * scale);
-        draw:AddRectFilled({ x + 2 * scale, y + 2 * scale }, { x + size - 2 * scale, y + size - 2 * scale },
-            imgui.GetColorU32(burst.theme.panel_bg), 3 * scale);
+        local inset = math.max(3, 3 * scale);
+        draw:AddRectFilled({ x + scale, y + scale }, { x + size - scale, y + size - scale },
+            imgui.GetColorU32(burst.theme.panel_bg), 1 * scale);
         imgui.SetCursorScreenPos({ x + inset, y + inset });
         local image_drawn = launcher_icon.draw(size - inset * 2, size - inset * 2);
-        draw_ornate_frame(draw, x + 2 * scale, y + 2 * scale, x + size - 2 * scale, y + size - 2 * scale,
-            burst.theme.brass, burst.theme.brass_dim, math.max(0.75, scale));
+        local border_color = imgui.GetColorU32(burst.theme.brass_hover);
+        local border_x1, border_y1 = x + scale, y + scale;
+        local border_x2, border_y2 = x + size - scale, y + size - scale;
+        local border_thickness = math.max(1, 1.5 * scale);
+        draw:AddLine({ border_x1, border_y1 }, { border_x2, border_y1 }, border_color, border_thickness);
+        draw:AddLine({ border_x2, border_y1 }, { border_x2, border_y2 }, border_color, border_thickness);
+        draw:AddLine({ border_x2, border_y2 }, { border_x1, border_y2 }, border_color, border_thickness);
+        draw:AddLine({ border_x1, border_y2 }, { border_x1, border_y1 }, border_color, border_thickness);
         if (not image_drawn) then
             draw:AddText({ x + size * 0.37, y + size * 0.27 }, imgui.GetColorU32(burst.theme.brass_hover), 'B');
         end

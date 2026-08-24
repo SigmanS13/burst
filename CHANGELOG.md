@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4 — 2026-08-24
+
+- Centered the `SKILL CHAIN:` heading and property inside a dedicated title plaque below the ornamental border.
+- Preserved the target name at the right side of the header with collision-aware truncation.
+- Centered the complete `BURST ELEMENTS` label-and-icon group as one responsive row.
+- Centered the primary recommendation and secondary `CAST NOW` message inside the action area without overlapping the timer plaque.
+- Simplified the draggable launcher by removing its ornamental backing accents and framing the supplied logo with one clean gold border.
+
 ## 0.2.3 — 2026-08-24
 
 - Fixed the launcher artwork rendering as a solid white rectangle in Ashita v4.

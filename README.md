@@ -1,4 +1,4 @@
-# Burst 0.2.3
+# Burst 0.2.4
 
 Burst is a manual magic-burst advisor and optional skillchain coach for **retail FFXI on Ashita v4**. It observes incoming combat data, recommends an action, and leaves every spell, weaponskill, target choice, and equipment change to the player.
 
@@ -91,7 +91,7 @@ The coach only reacts to confirmed actions. Unexpected steps in Adaptive Coach m
 - Per-user themes can be placed under `Ashita/config/addons/burst/themes/<name>/theme.txt`.
 - Put standard `.wav` files in `burst/sounds`, then use **Options → Sound → Refresh Sounds**. File choices are exact-name persisted and can be tested in place.
 - Element icons live under `burst/assets/elements`. If a texture cannot load on a particular Ashita build, Burst automatically retains its text-and-color presentation.
-- The draggable launcher uses the supplied Burst `B` artwork inside the tactical brass frame. Themes may override it with `launcher.png` in their theme folder; if it cannot load, the original text `B` remains as a fallback.
+- The draggable launcher uses the supplied Burst `B` artwork inside a clean gold border. Themes may override it with `launcher.png` in their theme folder; if it cannot load, the original text `B` remains as a fallback.
 
 ## Safety boundary
 

@@ -1,4 +1,6 @@
-# Burst 0.2.5
+# Burst 1.0.0
+
+Created by **Sigman**.
 
 Burst is a manual magic-burst advisor and optional skillchain coach for **retail FFXI on Ashita v4**. It observes incoming combat data, recommends an action, and leaves every spell, weaponskill, target choice, and equipment change to the player.
 
@@ -115,11 +117,15 @@ The coach only reacts to confirmed actions. Unexpected steps in Adaptive Coach m
 ## Appearance, themes, and sound
 
 - Use **Options → Appearance** for scale presets, card opacity/scale, edge intensity, reduced motion, alternates, controller layout, and the live draggable positioning preview.
+- The live card has scale-aware **Center Horizontally**, **Center Vertically**, and **Center Both** layout buttons. Single-axis buttons preserve the other coordinate and every result is clamped on-screen and saved.
 - The element-colored screen-edge cue is enabled by default and activates for every confirmed skillchain, including blocked recommendations. Use **Test Edge Cue** to preview it safely.
 - Use **Options → Timing → Post-Window Linger** to change the default 0.5-second dismissal hold.
 - Packaged themes live under `burst/themes/<name>/theme.txt`.
 - Per-user themes can be placed under `Ashita/config/addons/burst/themes/<name>/theme.txt`.
 - Put standard `.wav` files in `burst/sounds`, then use **Options → Sound → Refresh Sounds**. File choices are exact-name persisted and can be tested in place.
+- The optional **Record Breaker** easter egg is enabled by default. It keeps one all-time highest single outgoing-damage result per character, plays a selected celebration cue, shows a brief gold personal-best plaque, and writes one local chat line when the record increases.
+- Record Breaker's default cue is `celebrate.wav`. Place that file in `burst/sounds`, or choose and test any discovered WAV under **Options → Sound → Record Breaker**. Its cue is independent of the main Burst sound toggle.
+- Record Breaker reads the local player's confirmed incoming action results only. It excludes counters, retaliation, spikes, skillchain-only damage, drains, status ticks, damage taken, and other actors.
 - Element icons live under `burst/assets/elements`. If a texture cannot load on a particular Ashita build, Burst automatically retains its text-and-color presentation.
 - The draggable launcher uses the supplied Burst `B` artwork inside a clean gold border. Themes may override it with `launcher.png` in their theme folder; if it cannot load, the original text `B` remains as a fallback.
 

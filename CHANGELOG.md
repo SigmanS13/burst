@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0 — 2026-08-24
+
+- Added the passive Record Breaker easter egg, enabled by default, with one persistent all-time single-damage record per character.
+- Added exact local-actor packet validation and a damage-result whitelist that excludes counters, retaliation, spikes, drains, skillchain-only results, status ticks, damage taken, and other actors.
+- Added a compact gold personal-best notification and one local chat message when a record increases.
+- Added an independent Record Breaker WAV selector and test button under Options → Sound.
+- Set `celebrate.wav` as the default Record Breaker sound while preserving it as a selectable configured filename when the user has not copied the file into `burst\sounds` yet.
+- Promoted Burst to version 1.0.0 and retained `Sigman` as the addon author.
+
+## 0.2.6 — 2026-08-24
+
+- Added `Center Horizontally`, `Center Vertically`, and `Center Both` layout buttons for the live notification card.
+- Made centering use the current game resolution, interface scale, and Burst Card Scale so the complete card is centered accurately.
+- Kept single-axis centering independent: horizontal preserves Y, vertical preserves X, while all layout results are clamped on-screen and saved immediately.
+- Corrected `Reset Card Position` to use the same scale-aware geometry as the actual rendered card.
+
 ## 0.2.5 — 2026-08-24
 
 - Added advisory-only target elemental-weakness scoring with a default-on `+100` ranking bonus; explicit preferred elements remain stronger at `+120`.

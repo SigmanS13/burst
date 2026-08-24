@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.2.5';
+addon.version   = '1.0.0';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 
@@ -17,6 +17,7 @@ local player_state = require('core.player_state');
 local Tracker = require('core.tracker');
 local advisor = require('core.advisor');
 local planner = require('core.planner');
+local record_breaker = require('core.record_breaker');
 local skillchains = require('data.skillchains');
 local spell_catalog = require('data.spells');
 local skills = require('data.skills');
@@ -78,6 +79,9 @@ local default_settings = T{
     sound = T{
         enabled = false, burst_open = 'None', burst_success = 'None',
     },
+    record_breaker = T{
+        enabled = true, sound = 'celebrate.wav', records = T{},
+    },
 };
 
 burst = T{
@@ -103,6 +107,8 @@ burst = T{
     preview_drag_y = nil,
     next_position_save = nil,
     sound_files = T{ 'None' },
+    record_sound_available = false,
+    record_notification = nil,
     debug = false,
     packet_signatures = {},
     profile_key = nil,
@@ -123,6 +129,7 @@ local function ensure_settings()
     if (s.overlay == nil) then s.overlay = T{}; end
     if (s.ui == nil) then s.ui = T{}; end
     if (s.sound == nil) then s.sound = T{}; end
+    if (s.record_breaker == nil) then s.record_breaker = T{}; end
     for key, value in pairs(default_settings.advisor) do if (s.advisor[key] == nil) then s.advisor[key] = value; end end
     for key, value in pairs(default_settings.timing) do if (s.timing[key] == nil) then s.timing[key] = value; end end
     for key, value in pairs(default_settings.assist) do if (s.assist[key] == nil) then s.assist[key] = value; end end
@@ -130,6 +137,8 @@ local function ensure_settings()
     for key, value in pairs(default_settings.overlay) do if (s.overlay[key] == nil) then s.overlay[key] = value; end end
     for key, value in pairs(default_settings.ui) do if (s.ui[key] == nil) then s.ui[key] = value; end end
     for key, value in pairs(default_settings.sound) do if (s.sound[key] == nil) then s.sound[key] = value; end end
+    for key, value in pairs(default_settings.record_breaker) do if (s.record_breaker[key] == nil) then s.record_breaker[key] = value; end end
+    if (s.record_breaker.records == nil) then s.record_breaker.records = T{}; end
     if (s.advisor.disabled_spells == nil) then s.advisor.disabled_spells = T{}; end
     if (s.assist.participants == nil) then s.assist.participants = T{}; end
     for slot = 1, 3 do
@@ -414,23 +423,44 @@ local function refresh_sounds(announce)
         end
     end
     table.sort(files, function (a, b) if (a == 'None') then return true; end if (b == 'None') then return false; end return a:lower() < b:lower(); end);
-    burst.sound_files = T{};
-    for _, name in ipairs(files) do table.insert(burst.sound_files, name); end
     for _, key in ipairs({ 'burst_open', 'burst_success' }) do
         local wanted, found = tostring(burst.settings.sound[key] or 'None'):lower(), false;
         for _, name in ipairs(files) do if (name:lower() == wanted) then burst.settings.sound[key] = name; found = true; break; end end
         if (not found) then burst.settings.sound[key] = 'None'; end
     end
-    if (announce) then print(chat.header(addon.name):append(chat.message(string.format('Found %d WAV sound file(s).', math.max(0, #files - 1))))); end
+    local found_count = math.max(0, #files - 1);
+    local record_sound = tostring(burst.settings.record_breaker.sound or 'celebrate.wav');
+    local record_lower = record_sound:lower();
+    burst.record_sound_available = false;
+    for _, name in ipairs(files) do
+        if (name:lower() == record_lower) then
+            burst.settings.record_breaker.sound = name;
+            burst.record_sound_available = true;
+            break;
+        end
+    end
+    if (record_sound ~= 'None' and not burst.record_sound_available and not seen[record_lower]) then
+        table.insert(files, record_sound);
+        table.sort(files, function (a, b) if (a == 'None') then return true; end if (b == 'None') then return false; end return a:lower() < b:lower(); end);
+    end
+    burst.sound_files = T{};
+    for _, name in ipairs(files) do table.insert(burst.sound_files, name); end
+    if (announce) then print(chat.header(addon.name):append(chat.message(string.format('Found %d WAV sound file(s).', found_count)))); end
+end
+
+local function play_sound_file(name)
+    if (name == nil or name == 'None' or winmm == nil) then return false; end
+    local path = addon.path .. '\\sounds\\' .. tostring(name);
+    local file = io.open(path, 'rb');
+    if (file == nil) then return false; end
+    file:close();
+    pcall(function () winmm.PlaySoundA(path, nil, bit.bor(SND_FILENAME, SND_ASYNC, SND_NODEFAULT)); end);
+    return true;
 end
 
 local function play_sound(name)
-    if (burst.settings.sound.enabled ~= true or name == nil or name == 'None' or winmm == nil) then return; end
-    local path = addon.path .. '\\sounds\\' .. tostring(name);
-    local file = io.open(path, 'rb');
-    if (file == nil) then return; end
-    file:close();
-    pcall(function () winmm.PlaySoundA(path, nil, bit.bor(SND_FILENAME, SND_ASYNC, SND_NODEFAULT)); end);
+    if (burst.settings.sound.enabled ~= true) then return false; end
+    return play_sound_file(name);
 end
 
 --------------------------------------------------------------------------------------------------
@@ -440,6 +470,29 @@ end
 local function entity_name(server_id)
     local target = player_state.target_by_id(server_id);
     return target and target.name or ('Target ' .. tostring(server_id));
+end
+
+local function format_integer(value)
+    local digits = tostring(math.max(0, math.floor(tonumber(value) or 0)));
+    local formatted = digits:reverse():gsub('(%d%d%d)', '%1,'):reverse();
+    return formatted:gsub('^,', '');
+end
+
+local function handle_record_breaker(packet, now)
+    local cfg = burst.settings.record_breaker;
+    if (cfg.enabled ~= true) then return; end
+    local resources = AshitaCore and AshitaCore:GetResourceManager() or nil;
+    local event = record_breaker.process(packet, player_state.local_server_id(), player_state.character_name(),
+        cfg.records, entity_name, skills, resources, os.time());
+    if (event == nil) then return; end
+
+    event.started = now;
+    burst.record_notification = event;
+    play_sound_file(cfg.sound);
+    save_settings();
+    print(chat.header('Record Breaker'):append(chat.message(string.format(
+        'New personal best: %s damage with %s on %s.',
+        format_integer(event.damage), tostring(event.action), tostring(event.target)))));
 end
 
 local function combined_advisor_settings()
@@ -498,6 +551,7 @@ local function process_action_packet(e)
         return ashita.bits.unpack_be(raw, 0, offset, length);
     end, burst.settings.packet.layout);
     if (parsed == nil) then burst.tracker:mark_parse_error(err); return; end
+    handle_record_breaker(parsed, now);
     local events = burst.tracker:process(parsed, now, burst.settings.timing, player_state.local_server_id(), entity_name, player_state.is_alliance_actor);
     handle_tracker_events(events);
 end
@@ -518,6 +572,33 @@ local function run_preview(kind)
         burst.preview_state = { status = 'ready', property = 'Fragmentation', target = 'Apex Crab', spell = 'Thunder V',
             detail = 'CAST NOW', elements = skillchains.elements('Fragmentation'), remaining = 6.8, started = now };
     end
+end
+
+local function overlay_geometry(display, cfg)
+    display = display or imgui.GetIO().DisplaySize;
+    cfg = cfg or burst.settings.overlay;
+    local scale = get_ui_scale() * math.max(0.70, math.min(1.40, tonumber(cfg.card_scale) or 1.0));
+    local width = math.min(display.x * 0.68, 620 * scale);
+    local height = 196 * scale;
+    return scale, width, height;
+end
+
+local function place_overlay(center_horizontal, center_vertical, default_vertical)
+    local cfg = burst.settings.overlay;
+    local display = imgui.GetIO().DisplaySize;
+    local _, width, height = overlay_geometry(display, cfg);
+    local max_x = math.max(0, display.x - width);
+    local max_y = math.max(0, display.y - height);
+    local x = tonumber(cfg.position_x) or (max_x / 2);
+    local y = tonumber(cfg.position_y) or (display.y * 0.22);
+    if (center_horizontal) then x = max_x / 2; end
+    if (center_vertical) then y = max_y / 2;
+    elseif (default_vertical) then y = display.y * 0.22; end
+    cfg.position_x = math.floor(math.max(0, math.min(max_x, x)) + 0.5);
+    cfg.position_y = math.floor(math.max(0, math.min(max_y, y)) + 0.5);
+    burst.preview_visible = true;
+    run_preview('ready');
+    save_settings();
 end
 
 --------------------------------------------------------------------------------------------------
@@ -636,7 +717,7 @@ local function render_overlay()
     if (state == nil) then return; end
     local display = imgui.GetIO().DisplaySize;
     local cfg = burst.settings.overlay;
-    local scale = get_ui_scale() * math.max(0.70, math.min(1.40, tonumber(cfg.card_scale) or 1.0));
+    local scale, width, height = overlay_geometry(display, cfg);
     local element = state.elements and state.elements[1] or nil;
     local spell_element = nil;
     if (state.spell ~= nil) then
@@ -656,7 +737,6 @@ local function render_overlay()
         draw_edges(display, edge_color, edge_alpha);
     end
 
-    local width, height = math.min(display.x * 0.68, 620 * scale), 196 * scale;
     local x = tonumber(cfg.position_x) or math.floor((display.x - width) / 2);
     local y = tonumber(cfg.position_y) or math.floor(display.y * 0.22);
     local flags = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_NoResize, ImGuiWindowFlags_NoScrollbar,
@@ -834,6 +914,65 @@ local function render_overlay()
     end
     imgui.End();
     if (burst.next_position_save ~= nil and os.clock() >= burst.next_position_save) then burst.next_position_save = nil; save_settings(); end
+end
+
+local function render_record_notification()
+    local state = burst.record_notification;
+    if (state == nil) then return; end
+    local elapsed = os.clock() - (tonumber(state.started) or 0);
+    if (elapsed > 3.2) then burst.record_notification = nil; return; end
+
+    local display = imgui.GetIO().DisplaySize;
+    local card_scale, card_width, card_height = overlay_geometry(display, burst.settings.overlay);
+    local scale = math.max(0.72, card_scale);
+    local width = math.min(display.x * 0.62, 460 * scale);
+    local height = 94 * scale;
+    local card_x = tonumber(burst.settings.overlay.position_x) or ((display.x - card_width) / 2);
+    local card_y = tonumber(burst.settings.overlay.position_y) or (display.y * 0.22);
+    local x = math.max(0, math.min(display.x - width, card_x + (card_width - width) / 2));
+    local y = card_y - height - 10 * scale;
+    if (y < 0) then y = math.min(display.y - height, card_y + card_height + 10 * scale); end
+
+    local alpha = 1.0;
+    if (elapsed > 2.6) then alpha = math.max(0, (3.2 - elapsed) / 0.6); end
+    local flags = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_NoResize, ImGuiWindowFlags_NoScrollbar,
+        ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoFocusOnAppearing,
+        ImGuiWindowFlags_NoMove, ImGuiWindowFlags_NoInputs);
+    imgui.SetNextWindowPos({ x, y }, ImGuiCond_Always);
+    imgui.SetNextWindowSize({ width, height }, ImGuiCond_Always);
+    if (imgui.Begin('##burst_record_breaker_card', true, flags)) then
+        local wx, wy = imgui.GetWindowPos();
+        local draw = imgui.GetWindowDrawList();
+        local border = imgui.GetColorU32(color_alpha(burst.theme.brass_hover, alpha));
+        draw:AddRectFilled({ wx + 3 * scale, wy + 3 * scale }, { wx + width - 3 * scale, wy + height - 3 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.window_bg, 0.94 * alpha)), 3 * scale);
+        draw_chamfered_frame(draw, wx + 4 * scale, wy + 4 * scale, wx + width - 4 * scale, wy + height - 4 * scale,
+            9 * scale, border, math.max(1, 1.35 * scale));
+        draw:AddLine({ wx + 17 * scale, wy + 35 * scale }, { wx + width - 17 * scale, wy + 35 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.brass_dim, 0.80 * alpha)), math.max(1, scale));
+        draw_diamond_outline(draw, wx + width / 2, wy + 4 * scale, 5 * scale, 5 * scale,
+            border, math.max(1, scale));
+
+        local title = 'RECORD BREAKER  ·  NEW PERSONAL BEST';
+        set_ui_font_scale(0.92 * scale);
+        local title_width = measured_text_width(title);
+        imgui.SetCursorScreenPos({ wx + math.max(12 * scale, (width - title_width) / 2), wy + 12 * scale });
+        imgui.TextColored(color_alpha(burst.theme.brass_hover, alpha), title);
+
+        local damage_text = format_integer(state.damage) .. ' DAMAGE';
+        set_ui_font_scale(1.25 * scale);
+        local damage_width = measured_text_width(damage_text);
+        imgui.SetCursorScreenPos({ wx + math.max(12 * scale, (width - damage_width) / 2), wy + 41 * scale });
+        imgui.TextColored(color_alpha(burst.theme.important, alpha), damage_text);
+
+        set_ui_font_scale(0.88 * scale);
+        local detail = fit_overlay_text(tostring(state.action or 'Damage') .. '  ·  ' .. tostring(state.target or ''), width - 30 * scale);
+        local detail_width = measured_text_width(detail);
+        imgui.SetCursorScreenPos({ wx + math.max(15 * scale, (width - detail_width) / 2), wy + 69 * scale });
+        imgui.TextColored(color_alpha(burst.theme.text_muted, alpha), detail);
+        set_ui_font_scale(1.0);
+    end
+    imgui.End();
 end
 
 --------------------------------------------------------------------------------------------------
@@ -1148,12 +1287,15 @@ local function render_appearance_options()
     end
     imgui.SameLine();
     if (imgui.Button('Reset Card Position')) then
-        local display = imgui.GetIO().DisplaySize;
-        cfg.position_x = math.floor((display.x - 620 * get_ui_scale()) / 2);
-        cfg.position_y = math.floor(display.y * 0.22);
-        burst.preview_visible = true; run_preview('ready'); save_settings();
+        place_overlay(true, false, true);
     end
     imgui.TextColored(burst.theme.text_muted, 'The draggable preview closes when you leave Appearance.');
+    if (imgui.Button('Center Horizontally')) then place_overlay(true, false, false); end
+    imgui.SameLine();
+    if (imgui.Button('Center Vertically')) then place_overlay(false, true, false); end
+    imgui.SameLine();
+    if (imgui.Button('Center Both')) then place_overlay(true, true, false); end
+    imgui.TextColored(burst.theme.text_muted, 'Horizontal changes X only; vertical changes Y only; both centers the complete card.');
     local opacity = { tonumber(cfg.card_opacity) or 0.88 };
     if (imgui.SliderFloat('Burst Card Opacity', opacity, 0, 1, '%.2f')) then cfg.card_opacity = opacity[1]; save_settings(); end
     local card_scale = { tonumber(cfg.card_scale) or 1.0 };
@@ -1197,6 +1339,33 @@ local function render_sound_options()
     local success, success_changed = combo_value('Magic Burst Confirmed##burst_sound_success', cfg.burst_success, values);
     if (success_changed) then cfg.burst_success = success; save_settings(); end
     imgui.SameLine(); if (imgui.Button('Test##burst_test_success_sound')) then play_sound(cfg.burst_success); end
+
+    imgui.Spacing(); imgui.Separator();
+    imgui.TextColored(burst.theme.brass_hover, 'Record Breaker  ·  Easter Egg');
+    local record_cfg = burst.settings.record_breaker;
+    local record_enabled = record_cfg.enabled == true;
+    if (imgui.Checkbox('Enable Personal Damage Records', { record_enabled })) then
+        record_cfg.enabled = not record_enabled;
+        save_settings();
+    end
+    imgui.TextWrapped('Tracks one all-time highest single damage result per character. This passive cue is enabled by default and has its own sound choice.');
+    local record_sound, record_sound_changed = combo_value('New Personal Best##burst_record_sound', record_cfg.sound, values);
+    if (record_sound_changed) then record_cfg.sound = record_sound; refresh_sounds(false); save_settings(); end
+    imgui.SameLine(); if (imgui.Button('Test##burst_test_record_sound')) then play_sound_file(record_cfg.sound); end
+    if (record_cfg.sound ~= 'None' and not burst.record_sound_available) then
+        imgui.TextColored(burst.theme.important, tostring(record_cfg.sound) .. ' is selected but is not currently in burst\\sounds.');
+    else
+        imgui.TextColored(burst.theme.text_muted, 'Default: celebrate.wav');
+    end
+    local record_key = record_breaker.character_key(player_state.character_name());
+    local personal_record = record_key and record_cfg.records[record_key] or nil;
+    if (personal_record ~= nil) then
+        imgui.Text(string.format('%s record: %s damage', player_state.character_name(), format_integer(personal_record.damage)));
+        imgui.TextColored(burst.theme.text_muted, string.format('%s on %s',
+            tostring(personal_record.action or 'Damage'), tostring(personal_record.target or 'Unknown target')));
+    else
+        imgui.TextColored(burst.theme.text_muted, 'No personal record has been observed for this character yet.');
+    end
 end
 
 local function diagnostics_results()
@@ -1225,6 +1394,20 @@ local function diagnostics_results()
     check(#weakness_warnings == 1, 'Invalid weakness element warning');
     weakness_profile = select(1, weaknesses.lookup({ name = 'KNOWN NEUTRAL', race = 9999 }, normalized));
     check(weakness_profile ~= nil and #weakness_profile.weak == 0, 'Empty weakness override suppresses fallback');
+    local synthetic_records = {};
+    local record_event = record_breaker.process({ actor_id = 100, category = 3, param = 42, targets = {
+        { id = 200, actions = { { message = 185, param = 12345 } } },
+    } }, 100, 'Synthetic', synthetic_records, function () return 'Apex Crab'; end, skills, nil, 1);
+    check(record_event ~= nil and record_event.damage == 12345, 'Record Breaker recognizes local outgoing damage');
+    check(record_event ~= nil and record_event.action == 'Savage Blade', 'Record Breaker resolves weaponskill name');
+    record_event = record_breaker.process({ actor_id = 100, category = 3, param = 42, targets = {
+        { id = 200, actions = { { message = 185, param = 12000 }, { message = 33, param = 99999 } } },
+    } }, 100, 'Synthetic', synthetic_records, nil, skills, nil, 2);
+    check(record_event == nil and synthetic_records.synthetic.damage == 12345, 'Record Breaker rejects lower and counter damage');
+    record_event = record_breaker.process({ actor_id = 101, category = 3, param = 42, targets = {
+        { id = 200, actions = { { message = 185, param = 99999 } } },
+    } }, 100, 'Synthetic', synthetic_records, nil, skills, nil, 3);
+    check(record_event == nil, 'Record Breaker rejects another actor');
     return checks, failures;
 end
 
@@ -1451,7 +1634,7 @@ ashita.events.register('unload', 'burst_unload_cb', function () launcher_icon.un
 ashita.events.register('packet_in', 'burst_packet_in_cb', function (e)
     if (burst.settings == nil) then return; end
     if (e.id == 0x28) then process_action_packet(e);
-    elseif (e.id == 0x0A or e.id == 0x0B) then burst.tracker:clear('Zone transition cleared combat state.'); burst.active_plan = nil; end
+    elseif (e.id == 0x0A or e.id == 0x0B) then burst.tracker:clear('Zone transition cleared combat state.'); burst.active_plan = nil; burst.record_notification = nil; end
 end);
 
 ashita.events.register('command', 'burst_command_cb', function (e)
@@ -1492,5 +1675,5 @@ ashita.events.register('d3d_present', 'burst_present_cb', function ()
     if (burst.settings == nil or burst.theme == nil) then return; end
     sync_profile();
     update_recommendation();
-    render_overlay(); render_launcher(); render_config_window();
+    render_overlay(); render_record_notification(); render_launcher(); render_config_window();
 end);

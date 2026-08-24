@@ -68,8 +68,10 @@ function M.parse(data_raw, size, unpack_bits, layout_preference)
 
             local has_additional = read(offset, 1) == 1; offset = offset + 1;
             if (has_additional) then
+                local effect_animation = read(offset, 10);
                 action.additional_effect = {
-                    damage = read(offset, 10),
+                    animation = effect_animation,
+                    damage = effect_animation, -- compatibility alias for existing consumers
                     param = read(offset + 10, 17),
                     message = read(offset + 27, 10),
                 };

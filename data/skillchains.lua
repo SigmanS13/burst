@@ -56,13 +56,15 @@ M.info = {
         Detonation = { level = 1, result = 'Detonation' } },
 };
 
+-- Retail skillchain messages confirm that the additional effect is a skillchain.
+-- The property itself is the low six bits of the adjacent 10-bit effect/animation field.
 M.skillchain_messages = {
-    [288] = true, [289] = true, [290] = true, [291] = true, [292] = true,
-    [293] = true, [294] = true, [295] = true, [296] = true, [297] = true,
-    [298] = true, [299] = true, [300] = true, [301] = true,
-    [385] = true, [386] = true, [387] = true, [388] = true, [389] = true,
-    [390] = true, [391] = true, [392] = true, [393] = true, [394] = true,
-    [395] = true, [396] = true, [397] = true,
+    [288] = true, [289] = true, [290] = true, [291] = true, [292] = true, [293] = true,
+    [294] = true, [295] = true, [296] = true, [297] = true, [298] = true, [299] = true,
+    [300] = true, [301] = true,
+    [385] = true, [386] = true, [387] = true, [388] = true, [389] = true, [390] = true,
+    [391] = true, [392] = true, [393] = true, [394] = true, [395] = true, [396] = true,
+    [397] = true, [398] = true,
     [767] = true, [768] = true, [769] = true, [770] = true,
 };
 
@@ -73,9 +75,12 @@ M.magic_burst_messages = {
 };
 
 function M.from_additional_effect(effect)
-    if (effect == nil or not M.skillchain_messages[tonumber(effect.message) or -1]) then return nil; end
-    local code = bit.band(tonumber(effect.damage) or 0, 0x3F);
-    return M.properties[code];
+    if (effect == nil) then return nil; end
+    if (not M.skillchain_messages[tonumber(effect.message) or -1]) then return nil; end
+    local encoded = tonumber(effect.animation);
+    if (encoded == nil) then encoded = tonumber(effect.damage); end -- compatibility with older parsers
+    if (encoded == nil) then return nil; end
+    return M.properties[bit.band(encoded, 0x3F)];
 end
 
 function M.elements(property)

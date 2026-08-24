@@ -1,8 +1,8 @@
-# Burst 0.1.1
+# Burst 0.2.0
 
 Burst is a manual magic-burst advisor and optional skillchain coach for **retail FFXI on Ashita v4**. It observes incoming combat data, recommends an action, and leaves every spell, weaponskill, target choice, and equipment change to the player.
 
-The interface and settings workflow are based on the current **Warn 2.2.0** interaction model: a three-tab tactical dashboard, draggable launcher, responsive scale presets, live positioning preview, configurable appearance, custom WAV discovery/testing, persistent exact-name choices, controller navigation, and a diagnostics page.
+The interface and settings workflow are based on the current **Warn 2.2.0** interaction model: a three-tab tactical dashboard, draggable launcher, responsive scale presets, live positioning preview, configurable appearance, custom WAV discovery/testing, persistent exact-name choices, controller navigation, and a diagnostics page. The combat card, timer, launcher, and outer dashboard shell use a bespoke dark-navy and double-brass ornamental treatment inspired by classic fantasy UI frames.
 
 ## Install
 
@@ -43,7 +43,7 @@ After a confirmed skillchain on a valid loaded enemy, Burst:
 - Shows one recommendation and no more than two alternates.
 - Prefers a faster spell when a stronger spell would land too late.
 - Confirms a manually cast magic burst from its result packet.
-- Labels every live result as `SKILLCHAIN:` and displays all valid burst elements as color-coded capsules.
+- Labels every live result as `SKILL CHAIN:` and displays all valid burst elements as color-coded capsules.
 - Shows `WINDOW CLOSED` for 0.5 seconds by default, then dismisses the combat card.
 
 The default target policy is **Current Target Only**. This prevents a chain elsewhere in a crowded fight from telling you to cast on the wrong enemy.

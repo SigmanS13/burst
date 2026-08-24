@@ -1,6 +1,6 @@
 addon.name      = 'burst';
 addon.author    = 'Sigman';
-addon.version   = '0.1.1';
+addon.version   = '0.2.0';
 addon.desc      = 'Manual magic-burst advisor and optional skillchain coach for Ashita v4.';
 addon.link      = '';
 
@@ -190,12 +190,119 @@ local function set_ui_font_scale(value)
     end
 end
 
+local function measured_text_width(value)
+    local text = tostring(value or '');
+    if (type(imgui.CalcTextSize) == 'function') then
+        local ok, first, second = pcall(imgui.CalcTextSize, text);
+        if (ok) then
+            if (type(first) == 'table') then
+                local width = tonumber(first.x or first[1]);
+                if (width ~= nil) then return width; end
+            end
+            if (type(first) == 'number' and type(second) == 'number') then return first; end
+            local member_ok, width = pcall(function () return tonumber(first.x); end);
+            if (member_ok and width ~= nil) then return width; end
+        end
+    end
+    return #text * 8.0;
+end
+
+local function fit_overlay_text(value, max_width)
+    local text = tostring(value or '');
+    max_width = math.max(0, tonumber(max_width) or 0);
+    if (measured_text_width(text) <= max_width) then return text; end
+    local suffix = '...';
+    local low, high, best = 0, #text, suffix;
+    while (low <= high) do
+        local middle = math.floor((low + high) / 2);
+        local candidate = text:sub(1, middle):gsub('%s+$', '') .. suffix;
+        if (measured_text_width(candidate) <= max_width) then
+            best = candidate; low = middle + 1;
+        else
+            high = middle - 1;
+        end
+    end
+    return best;
+end
+
 local function reload_theme()
     burst.theme = ui_theme.load(addon.path, burst.settings.ui.theme);
 end
 
 local function color_alpha(color, alpha)
     return { color[1], color[2], color[3], math.max(0, math.min(1, alpha or color[4] or 1)) };
+end
+
+local function draw_diamond_outline(draw, center_x, center_y, radius_x, radius_y, color, thickness)
+    local top = { center_x, center_y - radius_y };
+    local right = { center_x + radius_x, center_y };
+    local bottom = { center_x, center_y + radius_y };
+    local left = { center_x - radius_x, center_y };
+    draw:AddLine(top, right, color, thickness);
+    draw:AddLine(right, bottom, color, thickness);
+    draw:AddLine(bottom, left, color, thickness);
+    draw:AddLine(left, top, color, thickness);
+end
+
+local function draw_chamfered_frame(draw, x1, y1, x2, y2, cut, color, thickness)
+    cut = math.max(1, math.min(cut, (x2 - x1) / 4, (y2 - y1) / 4));
+    draw:AddLine({ x1 + cut, y1 }, { x2 - cut, y1 }, color, thickness);
+    draw:AddLine({ x2 - cut, y1 }, { x2, y1 + cut }, color, thickness);
+    draw:AddLine({ x2, y1 + cut }, { x2, y2 - cut }, color, thickness);
+    draw:AddLine({ x2, y2 - cut }, { x2 - cut, y2 }, color, thickness);
+    draw:AddLine({ x2 - cut, y2 }, { x1 + cut, y2 }, color, thickness);
+    draw:AddLine({ x1 + cut, y2 }, { x1, y2 - cut }, color, thickness);
+    draw:AddLine({ x1, y2 - cut }, { x1, y1 + cut }, color, thickness);
+    draw:AddLine({ x1, y1 + cut }, { x1 + cut, y1 }, color, thickness);
+end
+
+local function draw_ornate_frame(draw, x1, y1, x2, y2, brass, brass_dim, scale)
+    local outer = imgui.GetColorU32(brass);
+    local inner = imgui.GetColorU32(brass_dim);
+    local thickness = math.max(1, 1.15 * scale);
+    local inset = 4 * scale;
+    local cut = 9 * scale;
+    draw_chamfered_frame(draw, x1, y1, x2, y2, cut, outer, thickness);
+    draw_chamfered_frame(draw, x1 + inset, y1 + inset, x2 - inset, y2 - inset,
+        math.max(3 * scale, cut - inset), inner, math.max(1, scale));
+
+    local middle_x, middle_y = (x1 + x2) / 2, (y1 + y2) / 2;
+    draw_diamond_outline(draw, middle_x, y1, 7 * scale, 7 * scale, outer, thickness);
+    draw_diamond_outline(draw, middle_x, y2, 7 * scale, 7 * scale, outer, thickness);
+    draw_diamond_outline(draw, x1, middle_y, 6 * scale, 7 * scale, outer, thickness);
+    draw_diamond_outline(draw, x2, middle_y, 6 * scale, 7 * scale, outer, thickness);
+
+    local echo = 22 * scale;
+    draw:AddLine({ x1 + cut + 3 * scale, y1 + inset + 2 * scale },
+        { x1 + cut + echo, y1 + inset + 2 * scale }, inner, math.max(1, scale));
+    draw:AddLine({ x2 - cut - echo, y1 + inset + 2 * scale },
+        { x2 - cut - 3 * scale, y1 + inset + 2 * scale }, inner, math.max(1, scale));
+    draw:AddLine({ x1 + cut + 3 * scale, y2 - inset - 2 * scale },
+        { x1 + cut + echo, y2 - inset - 2 * scale }, inner, math.max(1, scale));
+    draw:AddLine({ x2 - cut - echo, y2 - inset - 2 * scale },
+        { x2 - cut - 3 * scale, y2 - inset - 2 * scale }, inner, math.max(1, scale));
+end
+
+local function draw_ornate_progress(draw, x1, y1, x2, y2, fraction, accent, brass, brass_dim, scale)
+    local outer = imgui.GetColorU32(brass_dim);
+    local highlight = imgui.GetColorU32(color_alpha(brass, 0.85));
+    local fill = imgui.GetColorU32(accent);
+    local cut = math.max(3 * scale, (y2 - y1) * 0.45);
+    draw_chamfered_frame(draw, x1, y1, x2, y2, cut, outer, math.max(1, scale));
+    draw_chamfered_frame(draw, x1 + 2 * scale, y1 + 2 * scale, x2 - 2 * scale, y2 - 2 * scale,
+        math.max(2 * scale, cut - 2 * scale), highlight, math.max(1, 0.75 * scale));
+
+    fraction = math.max(0, math.min(1, tonumber(fraction) or 0));
+    local usable_x1, usable_x2 = x1 + 7 * scale, x2 - 7 * scale;
+    local fill_x = usable_x1 + (usable_x2 - usable_x1) * fraction;
+    if (fraction > 0) then
+        draw:AddRectFilled({ usable_x1, y1 + 4 * scale }, { fill_x, y2 - 4 * scale }, fill, 2 * scale);
+        draw:AddLine({ usable_x1 + 2 * scale, y1 + 5 * scale }, { math.max(usable_x1 + 2 * scale, fill_x - 2 * scale), y1 + 5 * scale },
+            imgui.GetColorU32(color_alpha(brass, 0.65)), math.max(1, scale));
+    end
+    local marker_x = math.max(usable_x1, math.min(usable_x2, fill_x));
+    draw_diamond_outline(draw, marker_x, (y1 + y2) / 2, 5 * scale, 5 * scale,
+        imgui.GetColorU32(brass), math.max(1, scale));
 end
 
 local element_colors = {
@@ -446,7 +553,7 @@ local function overlay_secondary_text(state, primary)
     if (state.status == 'closed') then return 'The magic-burst window has ended.'; end
     if (state.spell ~= nil) then return tostring(state.detail or 'CAST NOW'); end
     if (tostring(state.detail or '') == 'NOT LEARNED') then
-        return 'Learn or enable one of the burst elements shown above.';
+        return 'Learn or enable one of the elements above.';
     end
     if (tostring(state.detail or '') ~= primary) then return tostring(state.detail); end
     return nil;
@@ -491,14 +598,18 @@ local function render_overlay()
         local wx, wy = imgui.GetWindowPos();
         local draw = imgui.GetWindowDrawList();
         local bg = color_alpha(burst.theme.window_bg, tonumber(cfg.card_opacity) or 0.88);
-        draw:AddRectFilled({ wx, wy }, { wx + width, wy + height }, imgui.GetColorU32(bg), 7 * scale);
-        draw:AddRectFilled({ wx, wy }, { wx + width, wy + 34 * scale }, imgui.GetColorU32(color_alpha(burst.theme.panel_alt, 0.97)), 7 * scale);
-        draw:AddRectFilled({ wx + 16 * scale, wy + 78 * scale }, { wx + width - 16 * scale, wy + 145 * scale },
-            imgui.GetColorU32(color_alpha(burst.theme.field_bg, 0.86)), 5 * scale);
-        draw:AddRect({ wx, wy }, { wx + width, wy + height }, imgui.GetColorU32(burst.theme.brass), 7 * scale, 0, math.max(1, 1.25 * scale));
-        draw:AddRectFilled({ wx, wy }, { wx + 6 * scale, wy + height }, imgui.GetColorU32(chain_accent), 5 * scale);
-        draw:AddRectFilled({ wx + 16 * scale, wy + 151 * scale }, { wx + width - 16 * scale, wy + 162 * scale },
-            imgui.GetColorU32(burst.theme.field_bg), 3 * scale);
+        draw:AddRectFilled({ wx + 6 * scale, wy + 7 * scale }, { wx + width - 6 * scale, wy + height - 7 * scale },
+            imgui.GetColorU32(bg), 2 * scale);
+        draw:AddRectFilled({ wx + 10 * scale, wy + 11 * scale }, { wx + width - 10 * scale, wy + 36 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.panel_alt, 0.97)), 1 * scale);
+        draw:AddRectFilled({ wx + 18 * scale, wy + 77 * scale }, { wx + width - 18 * scale, wy + 145 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.field_bg, 0.90)), 2 * scale);
+        draw_ornate_frame(draw, wx + 7 * scale, wy + 8 * scale, wx + width - 7 * scale, wy + height - 8 * scale,
+            burst.theme.brass, burst.theme.brass_dim, scale);
+        draw_chamfered_frame(draw, wx + 18 * scale, wy + 77 * scale, wx + width - 18 * scale, wy + 145 * scale,
+            6 * scale, imgui.GetColorU32(color_alpha(chain_accent, 0.55)), math.max(1, scale));
+        draw:AddLine({ wx + 19 * scale, wy + 38 * scale }, { wx + width - 19 * scale, wy + 38 * scale },
+            imgui.GetColorU32(color_alpha(burst.theme.brass_dim, 0.70)), math.max(1, scale));
 
         if (appearance_open and burst.preview_visible) then
             imgui.SetCursorScreenPos({ wx, wy }); imgui.InvisibleButton('##burst_preview_drag', { width, height });
@@ -515,55 +626,72 @@ local function render_overlay()
         end
 
         imgui.SetCursorScreenPos({ wx + 20 * scale, wy + 8 * scale });
-        imgui.TextColored(burst.theme.brass_hover, (state.confirmed ~= true and not preview) and 'SKILLCHAIN GOAL:' or 'SKILLCHAIN:');
+        imgui.TextColored(burst.theme.brass_hover, (state.confirmed ~= true and not preview) and 'SKILL CHAIN GOAL:' or 'SKILL CHAIN:');
         imgui.SameLine(); imgui.TextColored(chain_accent, tostring(state.property or 'BURST'):upper());
         imgui.SameLine(); imgui.TextColored(burst.theme.text_muted, '  ' .. tostring(state.target or ''));
 
+        local element_label = 'BURST ELEMENTS';
         imgui.SetCursorScreenPos({ wx + 22 * scale, wy + 47 * scale });
-        imgui.TextColored(burst.theme.text_muted, 'BURST ELEMENTS');
-        local chip_x = wx + 132 * scale;
+        imgui.TextColored(burst.theme.text_muted, element_label);
+        local chip_x = wx + 22 * scale + measured_text_width(element_label) + 14 * scale;
         for _, burst_element in ipairs(state.elements or {}) do
             local chip_color = element_colors[burst_element] or burst.theme.important;
-            local chip_width = math.max(52, 22 + #tostring(burst_element) * 7.2) * scale;
-            draw:AddRectFilled({ chip_x, wy + 42 * scale }, { chip_x + chip_width, wy + 68 * scale },
-                imgui.GetColorU32(color_alpha(chip_color, 0.17)), 4 * scale);
-            draw:AddRect({ chip_x, wy + 42 * scale }, { chip_x + chip_width, wy + 68 * scale },
-                imgui.GetColorU32(color_alpha(chip_color, 0.78)), 4 * scale, 0, math.max(1, scale));
-            draw:AddRectFilled({ chip_x + 5 * scale, wy + 48 * scale }, { chip_x + 8 * scale, wy + 62 * scale },
-                imgui.GetColorU32(chip_color), 2 * scale);
-            imgui.SetCursorScreenPos({ chip_x + 12 * scale, wy + 47 * scale });
-            imgui.TextColored(chip_color, tostring(burst_element):upper());
+            local chip_text = tostring(burst_element):upper();
+            local chip_text_width = measured_text_width(chip_text);
+            local chip_width = math.max(52 * scale, chip_text_width + 24 * scale);
+            draw:AddRectFilled({ chip_x + 3 * scale, wy + 42 * scale }, { chip_x + chip_width - 3 * scale, wy + 68 * scale },
+                imgui.GetColorU32(color_alpha(chip_color, 0.17)), 1 * scale);
+            draw_chamfered_frame(draw, chip_x, wy + 42 * scale, chip_x + chip_width, wy + 68 * scale,
+                5 * scale, imgui.GetColorU32(color_alpha(chip_color, 0.90)), math.max(1, scale));
+            imgui.SetCursorScreenPos({ chip_x + math.max(10 * scale, (chip_width - chip_text_width) / 2), wy + 47 * scale });
+            imgui.TextColored(chip_color, chip_text);
             chip_x = chip_x + chip_width + 6 * scale;
         end
 
         local primary = overlay_primary_text(state);
         local secondary = overlay_secondary_text(state, primary);
+        local timer_text = state.remaining ~= nil and string.format('%.1fs', math.max(0, state.remaining)) or nil;
+        local timer_label = state.status == 'closed' and 'CLOSED' or 'REMAINING';
+        local badge_width = 0;
+        local badge_x = wx + width - 24 * scale;
+        if (timer_text ~= nil) then
+            badge_width = math.max(104 * scale, measured_text_width(timer_label) + 20 * scale,
+                measured_text_width(timer_text) + 24 * scale);
+            badge_x = wx + width - 24 * scale - badge_width;
+        end
+        local action_text_width = math.max(60 * scale, badge_x - (wx + 26 * scale) - 14 * scale);
         imgui.SetCursorScreenPos({ wx + 26 * scale, wy + 88 * scale });
         set_ui_font_scale(1.18 * scale);
-        imgui.TextColored(burst.theme.text, primary);
+        imgui.TextColored(burst.theme.text, fit_overlay_text(primary, action_text_width));
         set_ui_font_scale(1.0);
         if (secondary ~= nil) then
             imgui.SetCursorScreenPos({ wx + 26 * scale, wy + 119 * scale });
-            imgui.TextColored(state.status == 'blocked' and burst.theme.danger or accent, secondary);
+            imgui.TextColored(state.status == 'blocked' and burst.theme.danger or accent,
+                fit_overlay_text(secondary, action_text_width));
         end
 
         local fraction = state.status == 'success' and 1 or 0;
         if (state.remaining ~= nil) then
             fraction = math.max(0, math.min(1, state.remaining / math.max(0.1, tonumber(burst.settings.timing.burst_window) or 10)));
-            local badge_x = wx + width - 104 * scale;
-            draw:AddRectFilled({ badge_x, wy + 88 * scale }, { wx + width - 24 * scale, wy + 135 * scale },
-                imgui.GetColorU32(color_alpha(accent, 0.14)), 5 * scale);
-            draw:AddRect({ badge_x, wy + 88 * scale }, { wx + width - 24 * scale, wy + 135 * scale },
-                imgui.GetColorU32(color_alpha(accent, 0.72)), 5 * scale, 0, math.max(1, scale));
-            imgui.SetCursorScreenPos({ badge_x + 12 * scale, wy + 92 * scale });
+            draw:AddRectFilled({ badge_x + 4 * scale, wy + 89 * scale }, { badge_x + badge_width - 4 * scale, wy + 134 * scale },
+                imgui.GetColorU32(color_alpha(accent, 0.14)), 1 * scale);
+            draw_chamfered_frame(draw, badge_x, wy + 88 * scale, badge_x + badge_width, wy + 135 * scale,
+                7 * scale, imgui.GetColorU32(color_alpha(burst.theme.brass, 0.95)), math.max(1, 1.2 * scale));
+            draw_chamfered_frame(draw, badge_x + 3 * scale, wy + 91 * scale, badge_x + badge_width - 3 * scale, wy + 132 * scale,
+                5 * scale, imgui.GetColorU32(color_alpha(accent, 0.65)), math.max(1, scale));
+            draw_diamond_outline(draw, badge_x + badge_width / 2, wy + 88 * scale, 4 * scale, 4 * scale,
+                imgui.GetColorU32(burst.theme.brass_hover), math.max(1, scale));
             set_ui_font_scale(1.08 * scale);
-            imgui.TextColored(accent, string.format('%.1fs', math.max(0, state.remaining)));
+            local timer_width = measured_text_width(timer_text);
+            imgui.SetCursorScreenPos({ badge_x + math.max(6 * scale, (badge_width - timer_width) / 2), wy + 92 * scale });
+            imgui.TextColored(accent, timer_text);
             set_ui_font_scale(1.0);
-            imgui.SetCursorScreenPos({ badge_x + 10 * scale, wy + 116 * scale });
-            imgui.TextColored(burst.theme.text_muted, state.status == 'closed' and 'CLOSED' or 'REMAINING');
+            local label_width = measured_text_width(timer_label);
+            imgui.SetCursorScreenPos({ badge_x + math.max(6 * scale, (badge_width - label_width) / 2), wy + 116 * scale });
+            imgui.TextColored(burst.theme.text_muted, timer_label);
         end
-        draw:AddRectFilled({ wx + 16 * scale, wy + 151 * scale },
-            { wx + 16 * scale + (width - 32 * scale) * fraction, wy + 162 * scale }, imgui.GetColorU32(accent), 3 * scale);
+        draw_ornate_progress(draw, wx + 21 * scale, wy + 151 * scale, wx + width - 21 * scale, wy + 164 * scale,
+            fraction, accent, burst.theme.brass, burst.theme.brass_dim, scale);
 
         if (cfg.show_alternates and state.alternates ~= nil) then
             local names = {};
@@ -916,8 +1044,10 @@ local function diagnostics_results()
     check(result == 'Light', 'Fragmentation + Fusion should create Light');
     result = select(1, skillchains.resolve({ 'Distortion' }, { 'Gravitation' }));
     check(result == 'Darkness', 'Distortion + Gravitation should create Darkness');
-    check(skillchains.from_additional_effect({ message = 291, damage = 4 }) == 'Fragmentation', 'Additional-effect property decode');
-    check(skillchains.from_additional_effect({ message = 1, damage = 4 }) == nil, 'Reject non-skillchain additional effect');
+    check(skillchains.from_additional_effect({ message = 288, animation = 1 }) == 'Light', 'Light effect/animation decode');
+    check(skillchains.from_additional_effect({ message = 293, animation = 4 }) == 'Fragmentation', 'Message does not override property animation');
+    check(skillchains.from_additional_effect({ message = 398, animation = 14 }) == 'Impaction', 'Alternate message validates property animation');
+    check(skillchains.from_additional_effect({ message = 1, animation = 4 }) == nil, 'Reject non-skillchain additional effect');
     check(table.concat(skillchains.elements('Light'), ',') == 'Fire,Wind,Lightning,Light', 'Light burst-element list');
     check(#spell_catalog.entries >= 100, 'Spell catalog size');
     check(spell_catalog.by_name['thunder v'] ~= nil, 'Thunder V catalog entry');
@@ -1006,9 +1136,20 @@ local function render_launcher()
     if (imgui.Begin('##burst_launcher', true, flags)) then
         local x, y = imgui.GetCursorScreenPos();
         local draw = imgui.GetWindowDrawList();
-        draw:AddCircleFilled({ x + size / 2, y + size / 2 }, size * 0.46, imgui.GetColorU32(burst.theme.panel_bg), 48);
-        draw:AddCircle({ x + size / 2, y + size / 2 }, size * 0.43, imgui.GetColorU32(burst.theme.brass), 48, math.max(2, scale * 2));
-        draw:AddText({ x + size * 0.30, y + size * 0.22 }, imgui.GetColorU32(burst.theme.brass_hover), 'B');
+        local center_x, center_y = x + size / 2, y + size / 2;
+        draw:AddCircleFilled({ center_x, center_y }, size * 0.43, imgui.GetColorU32(burst.theme.panel_bg), 48);
+        draw:AddCircle({ center_x, center_y }, size * 0.43, imgui.GetColorU32(burst.theme.brass), 48, math.max(1, scale * 1.5));
+        draw:AddCircle({ center_x, center_y }, size * 0.36, imgui.GetColorU32(burst.theme.brass_dim), 48, math.max(1, scale));
+        local ornament = size * 0.075;
+        draw_diamond_outline(draw, center_x, y + size * 0.07, ornament, ornament,
+            imgui.GetColorU32(burst.theme.brass_hover), math.max(1, scale));
+        draw_diamond_outline(draw, center_x, y + size * 0.93, ornament, ornament,
+            imgui.GetColorU32(burst.theme.brass_hover), math.max(1, scale));
+        draw_diamond_outline(draw, x + size * 0.07, center_y, ornament, ornament,
+            imgui.GetColorU32(burst.theme.brass), math.max(1, scale));
+        draw_diamond_outline(draw, x + size * 0.93, center_y, ornament, ornament,
+            imgui.GetColorU32(burst.theme.brass), math.max(1, scale));
+        draw:AddText({ x + size * 0.37, y + size * 0.27 }, imgui.GetColorU32(burst.theme.brass_hover), 'B');
         imgui.InvisibleButton('##burst_launcher_control', { size, size });
         if (imgui.IsItemClicked(0)) then burst.ui.launcher_press = true; burst.ui.launcher_dragged = false; burst.ui.launcher_mouse_x, burst.ui.launcher_mouse_y = imgui.GetMousePos(); end
         if (burst.ui.launcher_press and imgui.IsMouseDown(0)) then
@@ -1038,9 +1179,8 @@ local function render_config_window()
     local flags = bit.bor(ImGuiWindowFlags_NoTitleBar, ImGuiWindowFlags_NoCollapse);
     if (imgui.Begin('BURST##burst_dashboard', burst.is_gui_open, flags)) then
         local wx, wy = imgui.GetWindowPos(); local ww, wh = imgui.GetWindowSize(); local draw = imgui.GetWindowDrawList();
-        draw:AddRect({ wx, wy }, { wx + ww, wy + wh }, imgui.GetColorU32(burst.theme.brass), burst.theme.rounding * scale, 0, math.max(1, burst.theme.border_size * scale));
-        draw:AddLine({ wx + 7 * scale, wy + 17 * scale }, { wx + 7 * scale, wy + 7 * scale }, imgui.GetColorU32(burst.theme.brass_dim), 2 * scale);
-        draw:AddLine({ wx + 7 * scale, wy + 7 * scale }, { wx + 17 * scale, wy + 7 * scale }, imgui.GetColorU32(burst.theme.brass_dim), 2 * scale);
+        draw_ornate_frame(draw, wx + 7 * scale, wy + 7 * scale, wx + ww - 7 * scale, wy + wh - 7 * scale,
+            burst.theme.brass, burst.theme.brass_dim, scale);
         set_ui_font_scale(1.28 * scale); imgui.TextColored(burst.theme.brass_hover, 'BURST'); set_ui_font_scale(1.0);
         imgui.TextColored(burst.theme.text_muted, 'VANA\'DIEL TACTICAL MAGIC-BURST ADVISOR');
         imgui.SameLine(); imgui.SetCursorPosX(math.max(imgui.GetCursorPosX(), ww - 45 * scale));
@@ -1085,7 +1225,10 @@ ashita.events.register('load', 'burst_load_cb', function ()
         if (new_settings ~= nil) then burst.settings = new_settings; burst.profile_key = nil; ensure_settings(); sync_profile(); reload_theme(); end
     end);
     local checks, failures = diagnostics_results();
-    print(chat.header(addon.name):append(chat.message(string.format('Loaded v%s — %d startup checks, %d failure(s). Advice only.', addon.version, checks, #failures))));
+    if (#failures > 0) then
+        print(chat.header(addon.name):append(chat.error(string.format('%d/%d startup checks failed: %s',
+            #failures, checks, table.concat(failures, '; ')))));
+    end
 end);
 
 ashita.events.register('unload', 'burst_unload_cb', function () save_settings(); end);
